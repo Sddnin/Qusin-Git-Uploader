@@ -11,6 +11,12 @@ import com.squareup.moshi.JsonClass
 import com.squareup.moshi.Moshi
 import java.io.InputStream
 import java.security.MessageDigest
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import okhttp3.Credentials
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -75,6 +81,7 @@ data class LfsBatchResponseDto(
 data class LfsUploadSource(
   val relativePath: String,
   val sizeBytes: Long,
+  val precomputedSha256: String? = null,
   val openStream: () -> InputStream,
 )
 
@@ -142,7 +149,7 @@ class GitLfsEngine(
 
   fun computeSha256(openStream: () -> InputStream, isCancelled: () -> Boolean): String {
     val digest = MessageDigest.getInstance("SHA-256")
-    val buffer = ByteArray(64 * 1024)
+    val buffer = ByteArray(256 * 1024)
     openStream().use { input ->
       while (true) {
         if (isCancelled()) throw AppErrorException(AppError.GitLfsFailure("Cancelled during SHA-256 scan"))
@@ -154,31 +161,41 @@ class GitLfsEngine(
     return digest.digest().joinToString("") { "%02x".format(it) }
   }
 
-  fun uploadObjectsViaBatchApi(
+  suspend fun uploadObjectsViaBatchApi(
     owner: String,
     repo: String,
     branch: String,
     sources: List<LfsUploadSource>,
+    concurrency: Int = 4,
     isCancelled: () -> Boolean,
     onLog: (String) -> Unit,
     onProgressDelta: (bytesDelta: Long) -> Unit,
-  ): List<LfsFilePlan> {
-    if (sources.isEmpty()) return emptyList()
+  ): List<LfsFilePlan> = coroutineScope {
+    if (sources.isEmpty()) return@coroutineScope emptyList()
     val token = tokenStore.getToken()
       ?: throw AppErrorException(AppError.Http401("Missing GitHub token for Git LFS"))
+    val workerLimit = concurrency.coerceIn(1, 6)
+    val semaphore = Semaphore(workerLimit)
 
-    // 1. Compute SHA-256 OIDs cleanly via streaming
+    // 1. Compute SHA-256 OIDs in parallel (reusing precomputed hashes when present)
     val plansWithSource = sources.map { source ->
-      onLog("[LFS] Hashing SHA-256: ${source.relativePath} (${source.sizeBytes} bytes)")
-      val oid = computeSha256(source.openStream, isCancelled)
-      val pointer = GitAttributesHelper.buildPointerText(oid, source.sizeBytes)
-      LfsFilePlan(
-        relativePath = source.relativePath,
-        sizeBytes = source.sizeBytes,
-        sha256Hex = oid,
-        pointerContent = pointer,
-      ) to source
-    }
+      async(Dispatchers.IO) {
+        semaphore.withPermit {
+          if (isCancelled()) throw AppErrorException(AppError.GitLfsFailure("Cancelled during SHA-256 scan"))
+          val oid = source.precomputedSha256 ?: run {
+            onLog("[LFS] Hashing SHA-256: ${source.relativePath} (${source.sizeBytes} bytes)")
+            computeSha256(source.openStream, isCancelled)
+          }
+          val pointer = GitAttributesHelper.buildPointerText(oid, source.sizeBytes)
+          LfsFilePlan(
+            relativePath = source.relativePath,
+            sizeBytes = source.sizeBytes,
+            sha256Hex = oid,
+            pointerContent = pointer,
+          ) to source
+        }
+      }
+    }.awaitAll()
 
     // 2. Request Batch API upload & verify actions
     val batchUrl = "https://github.com/$owner/$repo.git/info/lfs/objects/batch"
@@ -191,7 +208,7 @@ class GitLfsEngine(
     val jsonBody = batchReqAdapter.toJson(requestDto)
     val basicAuth = Credentials.basic("x-access-token", token)
 
-    onLog("[LFS] POST Batch API -> $batchUrl (${plansWithSource.size} object(s))")
+    onLog("[LFS] POST Batch API -> $batchUrl (${plansWithSource.size} object(s), workers=$workerLimit)")
     val batchRequest = Request.Builder()
       .url(batchUrl)
       .header("Accept", LFS_MEDIA_TYPE)
@@ -214,75 +231,79 @@ class GitLfsEngine(
 
     val responseMap = batchResponse.objects.associateBy { it.oid }
 
-    // 3. Upload & Verify each object
-    for ((plan, source) in plansWithSource) {
-      if (isCancelled()) throw AppErrorException(AppError.GitLfsFailure("Upload paused or cancelled"))
-      val objRes = responseMap[plan.sha256Hex]
-        ?: throw AppErrorException(AppError.GitLfsFailure("LFS server omitted object ${plan.sha256Hex}"))
+    // 3. Upload & Verify objects concurrently up to workerLimit
+    plansWithSource.map { (plan, source) ->
+      async(Dispatchers.IO) {
+        semaphore.withPermit {
+          if (isCancelled()) throw AppErrorException(AppError.GitLfsFailure("Upload paused or cancelled"))
+          val objRes = responseMap[plan.sha256Hex]
+            ?: throw AppErrorException(AppError.GitLfsFailure("LFS server omitted object ${plan.sha256Hex}"))
 
-      objRes.error?.let { objErr ->
-        throw AppErrorException(parseLfsHttpError(objErr.code, objErr.message))
-      }
+          objRes.error?.let { objErr ->
+            throw AppErrorException(parseLfsHttpError(objErr.code, objErr.message))
+          }
 
-      val uploadAction = objRes.actions?.upload
-      if (uploadAction == null) {
-        onLog("[LFS] Object already exists on GitHub LFS (verified skip): ${plan.sha256Hex.take(12)}...")
-        onProgressDelta(plan.sizeBytes)
-      } else {
-        onLog("[LFS] Streaming PUT ${source.relativePath} -> ${uploadAction.href.substringBefore('?')}")
-        val putBuilder = Request.Builder()
-          .url(uploadAction.href)
-          .header("User-Agent", "Qusin-Git-Uploader/1.0 (Android)")
+          val uploadAction = objRes.actions?.upload
+          if (uploadAction == null) {
+            onLog("[LFS] Object already exists on GitHub LFS (verified skip): ${plan.sha256Hex.take(12)}...")
+            onProgressDelta(plan.sizeBytes)
+          } else {
+            onLog("[LFS] Streaming PUT ${source.relativePath} -> ${uploadAction.href.substringBefore('?')}")
+            val putBuilder = Request.Builder()
+              .url(uploadAction.href)
+              .header("User-Agent", "Qusin-Git-Uploader/1.0 (Android)")
 
-        uploadAction.header?.forEach { (k, v) ->
-          putBuilder.header(k, v)
-        }
+            uploadAction.header?.forEach { (k, v) ->
+              putBuilder.header(k, v)
+            }
 
-        val streamingBody = StreamingProgressRequestBody(
-          contentLengthBytes = source.sizeBytes,
-          openStream = source.openStream,
-          isCancelled = isCancelled,
-          onBytesWritten = { delta, _ -> onProgressDelta(delta) },
-        )
-        putBuilder.put(streamingBody)
+            val streamingBody = StreamingProgressRequestBody(
+              contentLengthBytes = source.sizeBytes,
+              openStream = source.openStream,
+              isCancelled = isCancelled,
+              onBytesWritten = { delta, _ -> onProgressDelta(delta) },
+            )
+            putBuilder.put(streamingBody)
 
-        lfsHttpClient.newCall(putBuilder.build()).execute().use { putRes ->
-          val putErr = if (!putRes.isSuccessful) putRes.body?.string().orEmpty() else ""
-          if (!putRes.isSuccessful) {
-            throw AppErrorException(parseLfsHttpError(putRes.code, putErr))
+            lfsHttpClient.newCall(putBuilder.build()).execute().use { putRes ->
+              val putErr = if (!putRes.isSuccessful) putRes.body?.string().orEmpty() else ""
+              if (!putRes.isSuccessful) {
+                throw AppErrorException(parseLfsHttpError(putRes.code, putErr))
+              }
+            }
+            onLog("[LFS] Object PUT completed: ${plan.sha256Hex.take(12)}")
+          }
+
+          // 4. Verify action if provided by server
+          val verifyAction = objRes.actions?.verify
+          if (verifyAction != null) {
+            onLog("[LFS] Executing verify action for ${plan.sha256Hex.take(12)}...")
+            val verifyPayload = verifyReqAdapter.toJson(LfsObjectRefDto(plan.sha256Hex, plan.sizeBytes))
+            val verifyReqBuilder = Request.Builder()
+              .url(verifyAction.href)
+              .header("Accept", LFS_MEDIA_TYPE)
+              .header("Content-Type", LFS_MEDIA_TYPE)
+              .header("User-Agent", "Qusin-Git-Uploader/1.0 (Android)")
+              .post(verifyPayload.toRequestBody(LFS_MEDIA_TYPE.toMediaType()))
+
+            verifyAction.header?.forEach { (k, v) -> verifyReqBuilder.header(k, v) }
+            if (verifyAction.href.contains("github.com") && verifyAction.header?.containsKey("Authorization") != true) {
+              verifyReqBuilder.header("Authorization", basicAuth)
+            }
+
+            lfsHttpClient.newCall(verifyReqBuilder.build()).execute().use { verRes ->
+              if (!verRes.isSuccessful) {
+                val err = verRes.body?.string().orEmpty()
+                throw AppErrorException(AppError.GitLfsFailure("LFS verify failed (${verRes.code}): $err"))
+              }
+            }
+            onLog("[LFS] Object verified by GitHub LFS: ${plan.sha256Hex.take(12)}")
           }
         }
-        onLog("[LFS] Object PUT completed: ${plan.sha256Hex.take(12)}")
       }
+    }.awaitAll()
 
-      // 4. Verify action if provided by server
-      val verifyAction = objRes.actions?.verify
-      if (verifyAction != null) {
-        onLog("[LFS] Executing verify action for ${plan.sha256Hex.take(12)}...")
-        val verifyPayload = verifyReqAdapter.toJson(LfsObjectRefDto(plan.sha256Hex, plan.sizeBytes))
-        val verifyReqBuilder = Request.Builder()
-          .url(verifyAction.href)
-          .header("Accept", LFS_MEDIA_TYPE)
-          .header("Content-Type", LFS_MEDIA_TYPE)
-          .header("User-Agent", "Qusin-Git-Uploader/1.0 (Android)")
-          .post(verifyPayload.toRequestBody(LFS_MEDIA_TYPE.toMediaType()))
-
-        verifyAction.header?.forEach { (k, v) -> verifyReqBuilder.header(k, v) }
-        if (verifyAction.href.contains("github.com") && verifyAction.header?.containsKey("Authorization") != true) {
-          verifyReqBuilder.header("Authorization", basicAuth)
-        }
-
-        lfsHttpClient.newCall(verifyReqBuilder.build()).execute().use { verRes ->
-          if (!verRes.isSuccessful) {
-            val err = verRes.body?.string().orEmpty()
-            throw AppErrorException(AppError.GitLfsFailure("LFS verify failed (${verRes.code}): $err"))
-          }
-        }
-        onLog("[LFS] Object verified by GitHub LFS: ${plan.sha256Hex.take(12)}")
-      }
-    }
-
-    return plansWithSource.map { it.first }
+    plansWithSource.map { it.first }
   }
 
   private fun parseLfsHttpError(code: Int, body: String): AppError {

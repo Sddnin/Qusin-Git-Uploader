@@ -211,7 +211,7 @@ data class AppSettings(
   val defaultCommitMessage: String = "Update project via Qusin Git Uploader",
   val lfsEnabled: Boolean = true,
   val lfsThresholdMb: Int = 50,
-  val uploadConcurrency: Int = 2,
+  val uploadConcurrency: Int = 4,
   val maxExtractionSizeMb: Int = 500,
   val excludedFolders: Set<String> = DEFAULT_EXCLUDED_FOLDERS,
 ) {

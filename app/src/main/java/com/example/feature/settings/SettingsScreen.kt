@@ -461,8 +461,8 @@ fun SettingsScreen(
         Slider(
           value = s.uploadConcurrency.toFloat(),
           onValueChange = { viewModel.setUploadConcurrency(it.toInt()) },
-          valueRange = 1f..4f,
-          steps = 2,
+          valueRange = 1f..6f,
+          steps = 4,
         )
 
         Spacer(Modifier.height(8.dp))

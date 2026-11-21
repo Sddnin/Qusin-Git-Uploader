@@ -30,7 +30,7 @@ class SettingsDataStore(context: Context) {
       defaultCommitMessage = prefs[KEY_DEFAULT_COMMIT_MSG] ?: "Update project via Qusin Git Uploader",
       lfsEnabled = prefs[KEY_LFS_ENABLED] ?: true,
       lfsThresholdMb = prefs[KEY_LFS_THRESHOLD_MB] ?: 50,
-      uploadConcurrency = prefs[KEY_CONCURRENCY] ?: 2,
+      uploadConcurrency = (prefs[KEY_CONCURRENCY] ?: 4).coerceIn(1, 6),
       maxExtractionSizeMb = prefs[KEY_MAX_EXTRACT_MB] ?: 500,
       excludedFolders = prefs[KEY_EXCLUDED_FOLDERS] ?: AppSettings.DEFAULT_EXCLUDED_FOLDERS,
     )
@@ -63,7 +63,7 @@ class SettingsDataStore(context: Context) {
   }
 
   suspend fun setUploadConcurrency(concurrency: Int) {
-    dataStore.edit { it[KEY_CONCURRENCY] = concurrency.coerceIn(1, 4) }
+    dataStore.edit { it[KEY_CONCURRENCY] = concurrency.coerceIn(1, 6) }
   }
 
   suspend fun setMaxExtractionSizeMb(maxMb: Int) {

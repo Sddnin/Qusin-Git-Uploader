@@ -53,8 +53,22 @@ class NetworkClientProvider(private val tokenStore: TokenStore) {
     redactHeader("Cookie")
   }
 
+  private val sharedPool = okhttp3.ConnectionPool(16, 5, TimeUnit.MINUTES)
+
+  private val apiDispatcher = okhttp3.Dispatcher().apply {
+    maxRequests = 32
+    maxRequestsPerHost = 12
+  }
+
+  private val lfsDispatcher = okhttp3.Dispatcher().apply {
+    maxRequests = 24
+    maxRequestsPerHost = 10
+  }
+
   val okHttpClient: OkHttpClient = OkHttpClient.Builder()
     .connectionSpecs(listOf(ConnectionSpec.MODERN_TLS, ConnectionSpec.COMPATIBLE_TLS))
+    .connectionPool(sharedPool)
+    .dispatcher(apiDispatcher)
     .connectTimeout(30, TimeUnit.SECONDS)
     .readTimeout(120, TimeUnit.SECONDS)
     .writeTimeout(180, TimeUnit.SECONDS)
@@ -62,13 +76,14 @@ class NetworkClientProvider(private val tokenStore: TokenStore) {
     .addInterceptor(safeLogger)
     .build()
 
-  // Separate streaming client without request body buffering for large LFS object PUTs
+  // Separate high-throughput streaming client for large LFS PUTs & APK downloads
   val lfsTransferClient: OkHttpClient = OkHttpClient.Builder()
     .connectionSpecs(listOf(ConnectionSpec.MODERN_TLS, ConnectionSpec.COMPATIBLE_TLS))
+    .connectionPool(sharedPool)
+    .dispatcher(lfsDispatcher)
     .connectTimeout(30, TimeUnit.SECONDS)
     .readTimeout(180, TimeUnit.SECONDS)
     .writeTimeout(300, TimeUnit.SECONDS)
-    .addInterceptor(safeLogger)
     .build()
 
   val retrofit: Retrofit = Retrofit.Builder()
@@ -90,7 +105,7 @@ class StreamingProgressRequestBody(
   override fun contentLength(): Long = contentLengthBytes
 
   override fun writeTo(sink: BufferedSink) {
-    val buffer = ByteArray(64 * 1024)
+    val buffer = ByteArray(256 * 1024)
     var totalWritten = 0L
     openStream().use { input ->
       while (true) {

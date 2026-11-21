@@ -20,6 +20,12 @@ import com.example.domain.model.SelectedFileItem
 import com.example.domain.model.UploadStage
 import com.example.git.GitUploadFileItem
 import com.example.gitlfs.GitLfsClassifier
+import java.util.concurrent.atomic.AtomicLong
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
@@ -75,6 +81,9 @@ class UploadWorker(
       return Result.failure()
     }
 
+    val settings = container.settingsRepository.settings.first()
+    val concurrency = settings.uploadConcurrency.coerceIn(1, 6)
+
     createNotificationChannel()
     try {
       setForeground(buildForegroundInfo(taskId.hashCode(), payload.projectName, 0, "Preparing..."))
@@ -83,15 +92,20 @@ class UploadWorker(
 
     val logBuffer = StringBuilder(taskEntity.logs)
     fun appendLog(line: String) {
-      logBuffer.appendLine(line)
-      if (logBuffer.length > 16_000) {
-        logBuffer.delete(0, logBuffer.length - 12_000)
+      synchronized(logBuffer) {
+        logBuffer.appendLine(line)
+        if (logBuffer.length > 16_000) {
+          logBuffer.delete(0, logBuffer.length - 12_000)
+        }
       }
     }
 
-    var uploadedBytes = 0L
-    val startTimeMs = System.currentTimeMillis()
-    var lastPersistMs = 0L
+    fun snapshotLogs(): String = synchronized(logBuffer) { logBuffer.toString() }
+
+    val uploadedBytesAtomic = AtomicLong(0L)
+    val transferStartMs = AtomicLong(0L)
+    var currentStage = UploadStage.PREPARING
+    val totalBytes = payload.files.sumOf { it.sizeBytes }.coerceAtLeast(1L)
 
     val uploadItems = payload.files.map { f ->
       val item = SelectedFileItem(
@@ -114,26 +128,23 @@ class UploadWorker(
       )
     }
 
-    var currentStage = UploadStage.PREPARING
-    val totalBytes = payload.files.sumOf { it.sizeBytes }.coerceAtLeast(1L)
-
-    suspend fun persistProgress(force: Boolean = false) {
+    suspend fun persistProgress() {
       val now = System.currentTimeMillis()
-      if (!force && now - lastPersistMs < 350L) return
-      lastPersistMs = now
-      val elapsedSec = ((now - startTimeMs).coerceAtLeast(250L)) / 1000.0
-      val speed = uploadedBytes / elapsedSec
-      val remainingBytes = (totalBytes - uploadedBytes).coerceAtLeast(0L)
+      val transferred = uploadedBytesAtomic.get().coerceAtMost(totalBytes)
+      val startedAt = transferStartMs.get()
+      val elapsedSec = if (startedAt > 0L) ((now - startedAt).coerceAtLeast(250L)) / 1000.0 else 1.0
+      val speed = if (startedAt > 0L && transferred > 0L) transferred / elapsedSec else 0.0
+      val remainingBytes = (totalBytes - transferred).coerceAtLeast(0L)
       val eta = if (speed > 100.0) (remainingBytes / speed).toLong() else 0L
-      val pct = ((uploadedBytes.toDouble() / totalBytes.toDouble()) * 100).toInt().coerceIn(0, 99)
+      val pct = ((transferred.toDouble() / totalBytes.toDouble()) * 100).toInt().coerceIn(0, 99)
 
       taskDao.upsert(
         taskEntity.copy(
-          uploadedBytes = uploadedBytes.coerceAtMost(totalBytes),
+          uploadedBytes = transferred,
           speedBytesPerSec = speed,
           etaSeconds = eta,
           stage = currentStage.name,
-          logs = logBuffer.toString(),
+          logs = snapshotLogs(),
           updatedAt = now,
         ),
       )
@@ -154,46 +165,47 @@ class UploadWorker(
       val strategy = ConflictStrategy.entries.firstOrNull { it.name == payload.conflictStrategy }
         ?: ConflictStrategy.ABORT
 
-      val result = container.gitEngine.pushFilesAtomically(
-        owner = payload.owner,
-        repo = payload.repoName,
-        branch = payload.branch,
-        commitMessage = payload.commitMessage,
-        files = uploadItems,
-        filesToDelete = payload.filesToDelete,
-        expectedBaseSha = payload.expectedBaseSha,
-        conflictStrategy = strategy,
-        isCancelled = { isStopped },
-        onStageChange = { stage ->
-          currentStage = stage
-          appendLog("[STAGE] -> ${stage.name}")
-          persistProgress(force = true)
-        },
-        onLog = { line -> appendLog(line) },
-        onProgressDelta = { delta ->
-          uploadedBytes += delta
-          val now = System.currentTimeMillis()
-          if (now - lastPersistMs >= 450L) {
-            lastPersistMs = now
-            val elapsedSec = ((now - startTimeMs).coerceAtLeast(250L)) / 1000.0
-            val speed = uploadedBytes / elapsedSec
-            val remaining = (totalBytes - uploadedBytes).coerceAtLeast(0L)
-            val eta = if (speed > 100.0) (remaining / speed).toLong() else 0L
-            kotlinx.coroutines.runBlocking {
-              taskDao.upsert(
-                taskEntity.copy(
-                  uploadedBytes = uploadedBytes.coerceAtMost(totalBytes),
-                  speedBytesPerSec = speed,
-                  etaSeconds = eta,
-                  stage = currentStage.name,
-                  logs = logBuffer.toString(),
-                  updatedAt = now,
-                ),
-              )
-            }
+      val result = coroutineScope {
+        val progressTicker = launch {
+          while (isActive) {
+            delay(350L)
+            persistProgress()
           }
-        },
-      )
+        }
+        try {
+          container.gitEngine.pushFilesAtomically(
+            owner = payload.owner,
+            repo = payload.repoName,
+            branch = payload.branch,
+            commitMessage = payload.commitMessage,
+            files = uploadItems,
+            filesToDelete = payload.filesToDelete,
+            expectedBaseSha = payload.expectedBaseSha,
+            conflictStrategy = strategy,
+            concurrency = concurrency,
+            isCancelled = { isStopped },
+            onStageChange = { stage ->
+              currentStage = stage
+              if ((stage == UploadStage.UPLOADING || stage == UploadStage.UPLOADING_LFS) &&
+                transferStartMs.get() == 0L
+              ) {
+                transferStartMs.compareAndSet(0L, System.currentTimeMillis())
+              }
+              appendLog("[STAGE] -> ${stage.name}")
+              persistProgress()
+            },
+            onLog = { line -> appendLog(line) },
+            onProgressDelta = { delta ->
+              if (transferStartMs.get() == 0L) {
+                transferStartMs.compareAndSet(0L, System.currentTimeMillis())
+              }
+              uploadedBytesAtomic.addAndGet(delta)
+            },
+          )
+        } finally {
+          progressTicker.cancel()
+        }
+      }
 
       val completedAt = System.currentTimeMillis()
       val actualDeltaBytes = payload.files.sumOf { it.sizeBytes }
@@ -206,7 +218,7 @@ class UploadWorker(
         errorCode = null,
         errorCause = null,
         errorFix = null,
-        logs = logBuffer.toString(),
+        logs = snapshotLogs(),
         updatedAt = completedAt,
       )
       taskDao.upsert(finalTask)
@@ -225,7 +237,7 @@ class UploadWorker(
           timestamp = completedAt,
           status = UploadStage.COMPLETED.name,
           errorDetails = null,
-          logs = logBuffer.toString(),
+          logs = snapshotLogs(),
           previousCommitSha = result.previousCommitSha,
           previousTreeSha = result.previousTreeSha,
           newTreeSha = result.newTreeSha,
@@ -239,14 +251,15 @@ class UploadWorker(
       Result.success()
     } catch (t: Throwable) {
       val now = System.currentTimeMillis()
+      val transferred = uploadedBytesAtomic.get().coerceAtMost(totalBytes)
       if (isStopped) {
         appendLog("[PAUSED] Task paused or cancelled by user.")
         taskDao.upsert(
           taskEntity.copy(
-            uploadedBytes = uploadedBytes.coerceAtMost(totalBytes),
+            uploadedBytes = transferred,
             speedBytesPerSec = 0.0,
             stage = UploadStage.PAUSED.name,
-            logs = logBuffer.toString(),
+            logs = snapshotLogs(),
             updatedAt = now,
           ),
         )
@@ -257,13 +270,13 @@ class UploadWorker(
       appendLog("[ERROR] ${appError.code}: ${appError.technicalDetail ?: appError.titleEn}")
       taskDao.upsert(
         taskEntity.copy(
-          uploadedBytes = uploadedBytes.coerceAtMost(totalBytes),
+          uploadedBytes = transferred,
           speedBytesPerSec = 0.0,
           stage = UploadStage.FAILED.name,
           errorCode = appError.code,
           errorCause = appError.causeVi,
           errorFix = appError.fixVi,
-          logs = logBuffer.toString(),
+          logs = snapshotLogs(),
           updatedAt = now,
         ),
       )
@@ -282,7 +295,7 @@ class UploadWorker(
           timestamp = now,
           status = UploadStage.FAILED.name,
           errorDetails = "${appError.code}: ${appError.technicalDetail ?: appError.titleEn}",
-          logs = logBuffer.toString(),
+          logs = snapshotLogs(),
           updateMode = payload.updateMode,
           addedCount = payload.addedCount,
           modifiedCount = payload.modifiedCount,
