@@ -265,6 +265,42 @@ fun UploadScreen(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
           )
 
+          state.zipCommonRootFolder?.let { rootName ->
+            Spacer(Modifier.height(10.dp))
+            GlassCard(
+              modifier = Modifier.fillMaxWidth(),
+              glowColor = if (state.stripZipRootFolder) palette.cyanGlow else palette.warningAccent,
+              contentPadding = PaddingValues(10.dp),
+            ) {
+              Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+              ) {
+                Column(modifier = Modifier.weight(1f)) {
+                  Text(strings.stripZipRootLabel, style = MaterialTheme.typography.labelLarge)
+                  Spacer(Modifier.height(2.dp))
+                  val descTemplate = if (state.stripZipRootFolder) {
+                    strings.stripZipRootDescOn
+                  } else {
+                    strings.stripZipRootDescOff
+                  }
+                  Text(
+                    text = descTemplate.replace("%s", rootName),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (state.stripZipRootFolder) palette.cyanGlow else palette.warningAccent,
+                  )
+                }
+                Spacer(Modifier.width(8.dp))
+                Switch(
+                  checked = state.stripZipRootFolder,
+                  onCheckedChange = viewModel::toggleStripZipRootFolder,
+                  modifier = Modifier.testTag("strip_zip_root_switch"),
+                )
+              }
+            }
+          }
+
           // Extension filters
           if (state.availableExtensions.isNotEmpty()) {
             Spacer(Modifier.height(10.dp))

@@ -41,6 +41,8 @@ data class UploadUiState(
   val excludedFolders: Set<String> = AppSettings.DEFAULT_EXCLUDED_FOLDERS,
   val pendingZipItem: SelectedFileItem? = null,
   val selectedZipMode: ZipMode? = null,
+  val zipCommonRootFolder: String? = null,
+  val stripZipRootFolder: Boolean = true,
   val zipSkippedCount: Int = 0,
   val zipDuplicateCount: Int = 0,
   val repos: List<GitHubRepo> = emptyList(),
@@ -69,6 +71,8 @@ class UploadViewModel(
   private val excludedFoldersOverride = MutableStateFlow<Set<String>?>(null)
   private val pendingZipItem = MutableStateFlow<SelectedFileItem?>(null)
   private val selectedZipMode = MutableStateFlow<ZipMode?>(null)
+  private val zipCommonRootFolder = MutableStateFlow<String?>(null)
+  private val stripZipRootFolder = MutableStateFlow(true)
   private val zipMeta = MutableStateFlow(0 to 0)
   private val selectedRepo = MutableStateFlow<GitHubRepo?>(null)
   private val branches = MutableStateFlow<List<GitHubBranch>>(emptyList())
@@ -100,6 +104,11 @@ class UploadViewModel(
     TargetTuple(repos, repo, branchList, branch, msg)
   }
 
+  private val zipRootFlow = combine(
+    zipCommonRootFolder,
+    stripZipRootFolder,
+  ) { root, strip -> root to strip }
+
   private val metaFlow = combine(
     pendingZipItem,
     selectedZipMode,
@@ -114,6 +123,7 @@ class UploadViewModel(
     sourceFlow,
     targetFlow,
     metaFlow,
+    zipRootFlow,
     error,
     conflictPrompt,
     container.historyRepository.activeTasks,
@@ -121,12 +131,27 @@ class UploadViewModel(
     val src = flows[0] as SourceTuple
     val tgt = flows[1] as TargetTuple
     val meta = flows[2] as MetaTuple
-    val err = flows[3] as AppError?
-    val conflict = flows[4] as ConflictPromptState?
     @Suppress("UNCHECKED_CAST")
-    val taskList = flows[5] as List<UploadTaskModel>
+    val zipRootPair = flows[3] as Pair<String?, Boolean>
+    val err = flows[4] as AppError?
+    val conflict = flows[5] as ConflictPromptState?
+    @Suppress("UNCHECKED_CAST")
+    val taskList = flows[6] as List<UploadTaskModel>
 
-    val afterExclusions = src.files.filter { !PathSecurity.isExcludedPath(it.relativePath, src.excluded) }
+    val (commonRoot, stripRoot) = zipRootPair
+    val effectiveFiles = if (commonRoot != null && stripRoot) {
+      src.files.mapNotNull { item ->
+        val mapped = PathSecurity.applyRootStripAndPrefix(
+          relativePath = item.relativePath,
+          commonRootToStrip = commonRoot,
+        ) ?: return@mapNotNull null
+        item.copy(relativePath = mapped)
+      }
+    } else {
+      src.files
+    }
+
+    val afterExclusions = effectiveFiles.filter { !PathSecurity.isExcludedPath(it.relativePath, src.excluded) }
     val extensions = afterExclusions.map { it.extension }.filter { it.isNotEmpty() }.distinct().sorted()
     val visible = if (src.extFilter == null) {
       afterExclusions
@@ -146,6 +171,8 @@ class UploadViewModel(
       excludedFolders = src.excluded,
       pendingZipItem = meta.zipItem,
       selectedZipMode = meta.zipMode,
+      zipCommonRootFolder = commonRoot,
+      stripZipRootFolder = stripRoot,
       zipSkippedCount = meta.zipSkipped,
       zipDuplicateCount = meta.zipDup,
       repos = tgt.repos,
@@ -184,6 +211,7 @@ class UploadViewModel(
       error.value = null
       pendingZipItem.value = null
       selectedZipMode.value = null
+      zipCommonRootFolder.value = null
       try {
         val settings = container.settingsRepository.settings.first()
         val scanned = withContext(container.dispatchers.io) {
@@ -208,6 +236,7 @@ class UploadViewModel(
     viewModelScope.launch {
       isScanning.value = true
       error.value = null
+      zipCommonRootFolder.value = null
       try {
         val settings = container.settingsRepository.settings.first()
         val scanned = withContext(container.dispatchers.io) {
@@ -233,6 +262,7 @@ class UploadViewModel(
       error.value = null
       pendingZipItem.value = null
       selectedZipMode.value = null
+      zipCommonRootFolder.value = null
       try {
         val settings = container.settingsRepository.settings.first()
         val effectiveSettings = settings.copy(
@@ -254,6 +284,7 @@ class UploadViewModel(
     val zipItem = pendingZipItem.value ?: return
     selectedZipMode.value = mode
     if (mode == ZipMode.RAW_ZIP) {
+      zipCommonRootFolder.value = null
       rawFiles.value = listOf(zipItem)
       zipMeta.value = 0 to 0
       return
@@ -275,6 +306,8 @@ class UploadViewModel(
             settings = effectiveSettings,
           )
         }
+        zipCommonRootFolder.value = result.commonRootFolder
+        stripZipRootFolder.value = true
         rawFiles.value = result.entries
         zipMeta.value = result.skippedExcludedCount to result.duplicateCount
       } catch (t: Throwable) {
@@ -282,6 +315,10 @@ class UploadViewModel(
       }
       isScanning.value = false
     }
+  }
+
+  fun toggleStripZipRootFolder(strip: Boolean) {
+    stripZipRootFolder.value = strip
   }
 
   fun toggleFileSelected(fileId: String) {

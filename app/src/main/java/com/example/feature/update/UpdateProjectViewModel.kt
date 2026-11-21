@@ -6,6 +6,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.example.core.common.AppError
 import com.example.core.common.AppResult
+import com.example.core.security.PathSecurity
 import com.example.data.AppContainer
 import com.example.domain.model.ConflictStrategy
 import com.example.domain.model.DiffFileItem
@@ -34,6 +35,8 @@ data class UpdateProjectUiState(
   val selectedBranch: String = "main",
   val targetPrefix: String = "",
   val sourceLabel: String = "",
+  val zipCommonRootFolder: String? = null,
+  val stripZipRootFolder: Boolean = true,
   val stagedLocalFiles: List<SelectedFileItem> = emptyList(),
   val updateMode: UpdateMode = UpdateMode.UPDATE_CHANGES,
   val diffPlan: ProjectDiffPlan? = null,
@@ -56,6 +59,8 @@ class UpdateProjectViewModel(
   private val selectedBranch = MutableStateFlow("main")
   private val targetPrefix = MutableStateFlow("")
   private val sourceLabel = MutableStateFlow("")
+  private val zipCommonRootFolder = MutableStateFlow<String?>(null)
+  private val stripZipRootFolder = MutableStateFlow(true)
   private val stagedLocalFiles = MutableStateFlow<List<SelectedFileItem>>(emptyList())
   private val updateMode = MutableStateFlow(UpdateMode.UPDATE_CHANGES)
   private val diffPlan = MutableStateFlow<ProjectDiffPlan?>(null)
@@ -97,10 +102,16 @@ class UpdateProjectViewModel(
     MetaGroup(confirmDel, msg, busy, status, err)
   }
 
+  private val zipRootFlow = combine(
+    zipCommonRootFolder,
+    stripZipRootFolder,
+  ) { root, strip -> root to strip }
+
   val uiState: StateFlow<UpdateProjectUiState> = combine(
     targetFlow,
     sourceFlow,
     metaFlow,
+    zipRootFlow,
     conflictPrompt,
     container.historyRepository.activeTasks,
     container.settingsRepository.settings,
@@ -108,13 +119,27 @@ class UpdateProjectViewModel(
     val t = arr[0] as TargetGroup
     val s = arr[1] as SourceGroup
     val m = arr[2] as MetaGroup
-    val conflict = arr[3] as ConflictPromptState?
     @Suppress("UNCHECKED_CAST")
-    val tasks = arr[4] as List<UploadTaskModel>
-    val settings = arr[5] as com.example.domain.model.AppSettings
+    val zipRootPair = arr[3] as Pair<String?, Boolean>
+    val conflict = arr[4] as ConflictPromptState?
+    @Suppress("UNCHECKED_CAST")
+    val tasks = arr[5] as List<UploadTaskModel>
+    val settings = arr[6] as com.example.domain.model.AppSettings
 
     val effRepo = t.repo ?: t.repos.firstOrNull { it.fullName == settings.defaultRepoFullName } ?: t.repos.firstOrNull()
     val effBranch = if (t.repo != null) t.branch else effRepo?.defaultBranch ?: settings.defaultBranch
+    val (commonRoot, stripRoot) = zipRootPair
+    val effectiveLocalFiles = if (commonRoot != null && stripRoot) {
+      s.files.mapNotNull { item ->
+        val mapped = PathSecurity.applyRootStripAndPrefix(
+          relativePath = item.relativePath,
+          commonRootToStrip = commonRoot,
+        ) ?: return@mapNotNull null
+        item.copy(relativePath = mapped)
+      }
+    } else {
+      s.files
+    }
 
     UpdateProjectUiState(
       repos = t.repos,
@@ -123,7 +148,9 @@ class UpdateProjectViewModel(
       selectedBranch = effBranch,
       targetPrefix = t.prefix,
       sourceLabel = s.label,
-      stagedLocalFiles = s.files,
+      zipCommonRootFolder = commonRoot,
+      stripZipRootFolder = stripRoot,
+      stagedLocalFiles = effectiveLocalFiles,
       updateMode = s.mode,
       diffPlan = s.plan,
       showUnchanged = s.showUnchanged,
@@ -224,6 +251,7 @@ class UpdateProjectViewModel(
       isScanningOrDiffing.value = true
       error.value = null
       diffPlan.value = null
+      zipCommonRootFolder.value = null
       progressStatus.value = "Extracting ZIP safely into temp workspace..."
       try {
         val settings = container.settingsRepository.settings.first()
@@ -239,6 +267,8 @@ class UpdateProjectViewModel(
             settings = settings,
           )
         }
+        zipCommonRootFolder.value = result.commonRootFolder
+        stripZipRootFolder.value = true
         sourceLabel.value = "${zipItem.name} (${result.entries.size} files)"
         stagedLocalFiles.value = result.entries
       } catch (t: Throwable) {
@@ -254,6 +284,7 @@ class UpdateProjectViewModel(
       isScanningOrDiffing.value = true
       error.value = null
       diffPlan.value = null
+      zipCommonRootFolder.value = null
       progressStatus.value = "Scanning new project folder..."
       try {
         val settings = container.settingsRepository.settings.first()
@@ -268,6 +299,11 @@ class UpdateProjectViewModel(
       isScanningOrDiffing.value = false
       progressStatus.value = ""
     }
+  }
+
+  fun toggleStripZipRootFolder(strip: Boolean) {
+    stripZipRootFolder.value = strip
+    diffPlan.value = null
   }
 
   fun analyzeDiff() {

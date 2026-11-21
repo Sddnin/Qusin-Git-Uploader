@@ -1,7 +1,11 @@
 package com.example.feature.upload
 
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -16,6 +20,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Cancel
 import androidx.compose.material.icons.rounded.ErrorOutline
+import androidx.compose.material.icons.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Refresh
@@ -36,6 +41,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -48,6 +54,7 @@ import com.example.core.designsystem.LocalCyberPalette
 import com.example.domain.model.UploadStage
 import com.example.domain.model.UploadTaskModel
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun UploadTaskCard(
   task: UploadTaskModel,
@@ -57,6 +64,7 @@ fun UploadTaskCard(
   onCancel: () -> Unit,
 ) {
   val palette = LocalCyberPalette.current
+  val context = LocalContext.current
   var showLogs by remember { mutableStateOf(false) }
   var showError by remember { mutableStateOf(false) }
 
@@ -125,9 +133,10 @@ fun UploadTaskCard(
     }
 
     Spacer(Modifier.height(10.dp))
-    Row(
+    FlowRow(
       modifier = Modifier.fillMaxWidth(),
       horizontalArrangement = Arrangement.spacedBy(8.dp),
+      verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
       val isRunning = task.stage != UploadStage.COMPLETED &&
         task.stage != UploadStage.FAILED &&
@@ -154,6 +163,26 @@ fun UploadTaskCard(
           )
           Spacer(Modifier.width(4.dp))
           Text(if (task.stage == UploadStage.PAUSED) strings.resumeTask else strings.retryTask)
+        }
+      }
+
+      if (task.stage == UploadStage.COMPLETED) {
+        OutlinedButton(
+          onClick = {
+            val targetUrl = if (!task.commitSha.isNullOrBlank()) {
+              "https://github.com/${task.repoFullName}/tree/${task.branch}"
+            } else {
+              "https://github.com/${task.repoFullName}"
+            }
+            runCatching {
+              context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(targetUrl)))
+            }
+          },
+          modifier = Modifier.testTag("task_open_github_${task.id}"),
+        ) {
+          Icon(Icons.Rounded.OpenInNew, contentDescription = null, modifier = Modifier.size(16.dp))
+          Spacer(Modifier.width(4.dp))
+          Text(strings.viewOnGithub)
         }
       }
 

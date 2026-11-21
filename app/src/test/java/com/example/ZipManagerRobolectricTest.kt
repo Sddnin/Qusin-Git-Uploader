@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import com.example.core.common.AppError
 import com.example.core.common.AppErrorException
+import com.example.core.security.PathSecurity
 import com.example.domain.model.AppSettings
 import com.example.upload.ZipManager
 import java.io.ByteArrayInputStream
@@ -11,6 +12,7 @@ import java.io.ByteArrayOutputStream
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
@@ -57,8 +59,37 @@ class ZipManagerRobolectricTest {
     assertEquals(2, result.entries.size)
     assertEquals(2, result.skippedExcludedCount)
     assertEquals(1, result.duplicateCount)
+    assertNull(result.commonRootFolder)
     assertTrue(result.entries.any { it.relativePath == "src/main/App.kt" })
     assertTrue(result.entries.any { it.relativePath == "src/main/App_dup1.kt" })
+    zipManager.clearTempCache()
+  }
+
+  @Test
+  fun `detects single wrapper directory in ZIP and strips cleanly to repo root`() {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    val zipManager = ZipManager(context)
+    val bytes = buildZipBytes(
+      listOf(
+        "Mika-main/README.md" to "# Mika".toByteArray(),
+        "Mika-main/plugins/com.mika.purge-lite/script.sh" to "echo ok".toByteArray(),
+      ),
+    )
+
+    val result = zipManager.extractFromInputStream(
+      inputStream = ByteArrayInputStream(bytes),
+      zipName = "Mika-chatbuild.zip",
+      zipSizeBytes = bytes.size.toLong(),
+      settings = AppSettings(),
+    )
+
+    assertEquals("Mika-main", result.commonRootFolder)
+    val stripped = result.entries.mapNotNull {
+      PathSecurity.applyRootStripAndPrefix(it.relativePath, result.commonRootFolder)
+    }
+    assertEquals(listOf("README.md", "plugins/com.mika.purge-lite/script.sh"), stripped)
+    assertNull(PathSecurity.detectCommonRootFolder(listOf("README.md", "plugins/a.sh")))
+    assertNull(PathSecurity.detectCommonRootFolder(listOf(".github/workflows/ci.yml")))
     zipManager.clearTempCache()
   }
 

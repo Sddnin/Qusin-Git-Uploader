@@ -108,6 +108,7 @@ data class ZipInspectionResult(
   val zipSizeBytes: Long,
   val extractedDirPath: String,
   val entries: List<SelectedFileItem>,
+  val commonRootFolder: String? = null,
   val skippedExcludedCount: Int,
   val duplicateCount: Int,
   val totalExtractedBytes: Long,

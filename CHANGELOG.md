@@ -15,3 +15,4 @@
 - Hỗ trợ **11 ngôn ngữ** (`Tiếng Việt`, `English`, `中文`, `日本語`, `한국어`, `Español`, `Français`, `Deutsch`, `Português`, `Русский`, `Bahasa Indonesia`) cùng chế độ **Theo ngôn ngữ máy (System Auto)**.
 - Tích hợp liên kết trực tiếp kho `Sddnin/Qusin-Git-Uploader`, kiểm tra GitHub Releases và tải/cài đè APK qua `FileProvider` ngay trong phần Cài đặt.
 - Tối ưu tốc độ upload: gộp file text UTF-8 nhỏ trực tiếp vào `POST /git/trees`, upload song song nhiều luồng (hỗ trợ 1–6 luồng cho cả Git blob & Git LFS), mở rộng buffer 256 KB, và bỏ `runBlocking` khỏi luồng mạng.
+- Tự động nhận diện và gỡ thư mục bọc ngoài cùng trong file ZIP (ví dụ `Repo-main/` -> thư mục gốc repository) với nút bật/tắt trực tiếp ở màn Upload & Update, kèm nút mở nhanh repository trên GitHub ngay ở thẻ tác vụ hoàn tất.

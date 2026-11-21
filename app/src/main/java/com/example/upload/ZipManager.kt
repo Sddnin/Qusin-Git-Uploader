@@ -187,11 +187,14 @@ class ZipManager(private val context: Context) {
       throw AppErrorException(AppError.ZipExtractionFailure(msg.ifBlank { t.javaClass.simpleName }))
     }
 
+    val commonRoot = PathSecurity.detectCommonRootFolder(entries.map { it.relativePath })
+
     return ZipInspectionResult(
       zipName = zipName,
       zipSizeBytes = zipSizeBytes,
       extractedDirPath = extractRoot.absolutePath,
       entries = entries,
+      commonRootFolder = commonRoot,
       skippedExcludedCount = skippedExcluded,
       duplicateCount = duplicateCount,
       totalExtractedBytes = totalExtracted,

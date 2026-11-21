@@ -40,4 +40,63 @@ object PathSecurity {
     val dirSegments = if (segments.size > 1) segments.dropLast(1) else emptyList()
     return dirSegments.any { seg -> excludedFolders.any { ex -> ex.equals(seg, ignoreCase = true) } }
   }
+
+  private val PROTECTED_PROJECT_SUBDIRS = setOf(
+    ".github",
+    ".vscode",
+    ".idea",
+    "src",
+    "app",
+    "lib",
+    "libs",
+    "docs",
+    "assets",
+    "res",
+    "test",
+    "tests",
+    "scripts",
+    "gradle",
+    "public",
+  )
+
+  /**
+   * Detects when all entries inside an archive sit inside a single top-level wrapper
+   * directory (e.g. GitHub "Download ZIP" creates `Repo-main/README.md`, `Repo-main/src/...`).
+   * Returns null if any file is already at root, multiple top-level dirs exist,
+   * or the single directory is a known project subdirectory (`.github`, `src`, `app`, etc.).
+   */
+  fun detectCommonRootFolder(relativePaths: List<String>): String? {
+    if (relativePaths.isEmpty()) return null
+    var candidate: String? = null
+    for (path in relativePaths) {
+      val clean = sanitizeRelativeGitPath(path) ?: return null
+      val slashIdx = clean.indexOf('/')
+      if (slashIdx <= 0) return null
+      val root = clean.substring(0, slashIdx)
+      if (root.lowercase() in PROTECTED_PROJECT_SUBDIRS) return null
+      if (candidate == null) {
+        candidate = root
+      } else if (candidate != root) {
+        return null
+      }
+    }
+    return candidate
+  }
+
+  fun applyRootStripAndPrefix(
+    relativePath: String,
+    commonRootToStrip: String? = null,
+    targetPrefix: String = "",
+  ): String? {
+    var current = sanitizeRelativeGitPath(relativePath) ?: return null
+    if (!commonRootToStrip.isNullOrBlank()) {
+      val prefix = "${commonRootToStrip.trim('/')}/"
+      if (current.startsWith(prefix)) {
+        current = current.removePrefix(prefix)
+      }
+    }
+    val cleanTargetPrefix = targetPrefix.trim().replace('\\', '/').trim('/')
+    val combined = if (cleanTargetPrefix.isEmpty()) current else "$cleanTargetPrefix/$current"
+    return sanitizeRelativeGitPath(combined)
+  }
 }

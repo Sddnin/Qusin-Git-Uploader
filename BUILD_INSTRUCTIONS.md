@@ -2,8 +2,8 @@
 
 ## 1. Build tự động bằng GitHub Actions (Khuyên dùng)
 
-1. Tạo một repository mới trên GitHub (Public hoặc Private).
-2. Giải nén hoặc upload toàn bộ nội dung trong file `Qusin-Git-Uploader-1.0.zip` lên nhánh `main` của repository.
+1. Tạo hoặc sử dụng repository `Sddnin/Qusin-Git-Uploader` trên GitHub (Public hoặc Private).
+2. Đẩy toàn bộ mã nguồn dự án (xem tổng quan tính năng tại `README_EN.md`) lên nhánh `main` của repository.
 3. Đảm bảo file `.github/workflows/android-build.yml` nằm đúng đường dẫn trong nhánh `main`.
 4. Vào tab **Actions** trên GitHub -> chọn workflow **Android CI Build (Qusin Git Uploader)**.
 5. Sau khi workflow chạy xong (`testDebugUnitTest` và `assembleDebug`), cuộn xuống mục **Artifacts** và tải về **Qusin-Git-Uploader-APK** (chứa `app-debug.apk`).
