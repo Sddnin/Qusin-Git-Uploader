@@ -1,0 +1,6 @@
+{
+  "name": "Qusin Git Uploader",
+  "description": "Android native developer tool to upload source code, ZIP archives, APKs, and large files via GitHub REST API and Git LFS directly from mobile.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

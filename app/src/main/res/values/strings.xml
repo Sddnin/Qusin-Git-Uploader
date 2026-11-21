@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">Qusin Git Uploader</string>
+    <string name="upload_notification_channel_name">Upload Tiến Trình / Upload Progress</string>
+    <string name="upload_notification_channel_desc">Thông báo tiến trình tải lên GitHub và Git LFS</string>
+</resources>
