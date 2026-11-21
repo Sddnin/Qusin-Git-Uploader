@@ -4,10 +4,12 @@ on:
   push:
     branches:
       - main
+    tags:
+      - "v*"
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -97,3 +99,31 @@ jobs:
           name: Qusin-Git-Uploader-Release-APK
           path: app/build/outputs/apk/release/*.apk
           retention-days: 14
+
+      - name: Publish GitHub Release with direct APK download
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION_NAME=$(grep -m1 'versionName' app/build.gradle.kts | sed -E 's/.*"([^"]+)".*/\1/')
+          VERSION_NAME="${VERSION_NAME:-1.0}"
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            RELEASE_TAG="${GITHUB_REF_NAME}"
+          else
+            RELEASE_TAG="v${VERSION_NAME}.${GITHUB_RUN_NUMBER}"
+          fi
+
+          mkdir -p release-assets
+          cp app/build/outputs/apk/debug/app-debug.apk "release-assets/Qusin-Git-Uploader-${RELEASE_TAG}-debug.apk"
+          RELEASE_APK=$(find app/build/outputs/apk/release -maxdepth 1 -name "*.apk" 2>/dev/null | head -n1 || true)
+          if [ -n "$RELEASE_APK" ]; then
+            cp "$RELEASE_APK" "release-assets/Qusin-Git-Uploader-${RELEASE_TAG}-release.apk"
+          fi
+
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" release-assets/*.apk --clobber
+          else
+            gh release create "$RELEASE_TAG" release-assets/*.apk \
+              --target "${GITHUB_SHA}" \
+              --title "Qusin Git Uploader ${RELEASE_TAG}" \
+              --generate-notes
+          fi
