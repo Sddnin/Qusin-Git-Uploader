@@ -26,6 +26,7 @@ import java.nio.ByteBuffer
 import java.nio.charset.CodingErrorAction
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
+import java.util.Collections
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -70,6 +71,7 @@ data class RawTreeEntry(
   val sha: String? = null,
   val inlineContent: String? = null,
   val isDeletion: Boolean = false,
+  val originalSizeBytes: Long = 0L,
 )
 
 class GitEngine(
@@ -78,9 +80,9 @@ class GitEngine(
   private val moshi: Moshi,
 ) {
   companion object {
-    private const val MAX_INLINE_FILE_BYTES = 32 * 1024
-    private const val MAX_INLINE_BATCH_FILES = 150
-    private const val MAX_INLINE_BATCH_BYTES = 1_572_864L
+    private const val MAX_INLINE_FILE_BYTES = 96 * 1024
+    private const val MAX_TREE_CHUNK_ENTRIES = 200
+    private const val MAX_TREE_CHUNK_BYTES = 1_500_000L
   }
 
   /**
@@ -242,7 +244,8 @@ class GitEngine(
 
     val lfsItems = files.filter { it.useLfs }
     val standardItems = files.filter { !it.useLfs }
-    val rawTreeEntries = mutableListOf<RawTreeEntry>()
+    val inlineTextEntries = Collections.synchronizedList(mutableListOf<RawTreeEntry>())
+    val blobShaEntries = Collections.synchronizedList(mutableListOf<RawTreeEntry>())
 
     // Phase A: Git LFS Batch API + Parallel Streaming PUT + Verify + Inline Pointer Tree Entries
     if (lfsItems.isNotEmpty()) {
@@ -280,61 +283,44 @@ class GitEngine(
         existingContent = existingAttrsText,
         lfsRelativePaths = lfsPlans.map { it.relativePath },
       )
-      rawTreeEntries.add(RawTreeEntry(path = ".gitattributes", inlineContent = mergedAttrs))
-      onLog("[LFS] Staged .gitattributes inline in tree")
-
+      inlineTextEntries.add(RawTreeEntry(path = ".gitattributes", inlineContent = mergedAttrs))
       for (plan in lfsPlans) {
         if (isCancelled()) throw AppErrorException(AppError.GitLfsFailure("Upload cancelled"))
-        rawTreeEntries.add(RawTreeEntry(path = plan.relativePath, inlineContent = plan.pointerContent))
-        onLog("[LFS] Staged pointer for ${plan.relativePath}")
+        inlineTextEntries.add(RawTreeEntry(path = plan.relativePath, inlineContent = plan.pointerContent))
       }
+      onLog("[LFS] Staged .gitattributes + ${lfsPlans.size} pointer(s) inline in tree")
     }
 
-    // Phase B: Standard Git Files — Hybrid Fast Path (Inline UTF-8 in Tree + Parallel Blob Uploads)
+    // Phase B: Standard Git Files — Single-Read Parallel Pipeline (Chunked Inline UTF-8 + Parallel Blobs)
+    var runningBaseTreeSha = snapshot.baseTreeSha
     if (standardItems.isNotEmpty()) {
       onStageChange(UploadStage.UPLOADING)
+      onLog("[GIT] Processing ${standardItems.size} file(s) with $workerLimit parallel worker(s)...")
 
-      // Partition into fast inline small UTF-8 files vs parallel binary/larger blob uploads
-      var inlineFilesCount = 0
-      var inlineTotalBytes = 0L
-      val blobUploadQueue = mutableListOf<Pair<String, GitUploadFileItem>>()
-      val inlineStaged = mutableListOf<Pair<String, Long>>()
+      val semaphore = Semaphore(workerLimit)
+      standardItems.map { item ->
+        async(Dispatchers.IO) {
+          semaphore.withPermit {
+            if (isCancelled()) throw AppErrorException(AppError.Unknown("Upload cancelled by user"))
+            val safePath = sanitizeOrThrow(item.relativePath)
 
-      for (item in standardItems) {
-        if (isCancelled()) throw AppErrorException(AppError.Unknown("Upload cancelled by user"))
-        val safePath = sanitizeOrThrow(item.relativePath)
+            // Read SAF/temp stream ONCE; if valid UTF-8 <= 96KB, stage inline without POST /git/blobs
+            val rawBytes = readAllBytesSafely(item.openStream)
+            val utf8Text = if (rawBytes.size <= MAX_INLINE_FILE_BYTES) {
+              tryDecodeExactUtf8(rawBytes)
+            } else {
+              null
+            }
 
-        val canTryInline = item.sizeBytes in 0L..MAX_INLINE_FILE_BYTES.toLong() &&
-          inlineFilesCount < MAX_INLINE_BATCH_FILES &&
-          inlineTotalBytes + item.sizeBytes <= MAX_INLINE_BATCH_BYTES
-
-        if (canTryInline) {
-          val rawBytes = readAllBytesSafely(item.openStream)
-          val utf8Text = tryDecodeExactUtf8(rawBytes)
-          if (utf8Text != null) {
-            rawTreeEntries.add(RawTreeEntry(path = safePath, inlineContent = utf8Text))
-            inlineFilesCount++
-            inlineTotalBytes += rawBytes.size.toLong()
-            inlineStaged.add(safePath to item.sizeBytes)
-            onProgressDelta(item.sizeBytes)
-            continue
-          }
-        }
-        blobUploadQueue.add(safePath to item)
-      }
-
-      if (inlineStaged.isNotEmpty()) {
-        onLog("[GIT] Batched ${inlineStaged.size} small text file(s) (${inlineTotalBytes} B) inline into tree (zero per-file round-trips)")
-      }
-
-      if (blobUploadQueue.isNotEmpty()) {
-        onLog("[GIT] Uploading ${blobUploadQueue.size} blob(s) in parallel ($workerLimit concurrent workers)...")
-        val semaphore = Semaphore(workerLimit)
-        val uploadedBlobEntries = blobUploadQueue.map { (safePath, item) ->
-          async(Dispatchers.IO) {
-            semaphore.withPermit {
-              if (isCancelled()) throw AppErrorException(AppError.Unknown("Upload cancelled by user"))
-              val rawBytes = readAllBytesSafely(item.openStream)
+            if (utf8Text != null) {
+              inlineTextEntries.add(
+                RawTreeEntry(
+                  path = safePath,
+                  inlineContent = utf8Text,
+                  originalSizeBytes = item.sizeBytes,
+                ),
+              )
+            } else {
               val base64 = Base64.encodeToString(rawBytes, Base64.NO_WRAP)
               val remoteBlobSha = createBlobWithRetry(
                 owner = owner,
@@ -343,41 +329,60 @@ class GitEngine(
                 isCancelled = isCancelled,
               )
               onProgressDelta(item.sizeBytes)
-              onLog("[GIT] Blob $safePath -> ${remoteBlobSha.take(7)}")
-              RawTreeEntry(path = safePath, sha = remoteBlobSha)
+              blobShaEntries.add(RawTreeEntry(path = safePath, sha = remoteBlobSha))
             }
           }
-        }.awaitAll()
-        rawTreeEntries.addAll(uploadedBlobEntries)
-      }
+        }
+      }.awaitAll()
     }
 
     // Phase B2: Deletions via explicit sha = null on base_tree
     val cleanDeletions = filesToDelete.mapNotNull { PathSecurity.sanitizeRelativeGitPath(it) }
-    for (delPath in cleanDeletions) {
-      rawTreeEntries.add(RawTreeEntry(path = delPath, isDeletion = true))
+    val deletionEntries = cleanDeletions.map { delPath ->
       onLog("[GIT] Marked for deletion: $delPath")
+      RawTreeEntry(path = delPath, isDeletion = true)
     }
 
-    // Phase C: Create Atomic Git Tree (handles inline content, blob SHAs, and sha: null deletions cleanly)
+    // Phase C: Push all inline text entries in safe chunks (up to 200 files / 1.5MB per POST /git/trees)
+    // followed by binary blob SHAs & deletions, chaining base_tree -> single atomic commit at the end.
     onStageChange(UploadStage.COMMITTING)
-    onLog("[GIT] Creating atomic tree (${rawTreeEntries.size} entries, ${cleanDeletions.size} deletions)...")
-    val jsonBody = serializeRawTree(
-      baseTree = snapshot.baseTreeSha,
-      entries = rawTreeEntries,
-    )
-    val treeRes = api.createTreeRaw(
-      owner = owner,
-      repo = repo,
-      body = jsonBody.toRequestBody("application/json; charset=utf-8".toMediaType()),
-    )
-    if (!treeRes.isSuccessful) {
-      throw AppErrorException(AppError.fromHttpStatus(treeRes.code(), treeRes.errorBody()?.string()))
+    val inlineChunks = chunkTreeEntries(inlineTextEntries.toList())
+    if (inlineChunks.isNotEmpty()) {
+      onLog("[GIT] Batch-committing ${inlineTextEntries.size} text file(s) in ${inlineChunks.size} tree chunk(s) (zero per-file REST calls)...")
     }
-    val newTreeSha = treeRes.body()?.sha
-      ?: throw AppErrorException(AppError.Unknown("Missing tree SHA"))
 
-    // Phase D: Create Git Commit
+    val trailingEntries = blobShaEntries.toList() + deletionEntries
+    val trailingChunks = if (trailingEntries.isNotEmpty()) {
+      trailingEntries.chunked(MAX_TREE_CHUNK_ENTRIES)
+    } else {
+      emptyList()
+    }
+    val allChunks = inlineChunks + trailingChunks
+    require(allChunks.isNotEmpty()) { "No tree chunks to commit" }
+
+    for ((idx, chunk) in allChunks.withIndex()) {
+      if (isCancelled()) throw AppErrorException(AppError.Unknown("Upload cancelled by user"))
+      val jsonBody = serializeRawTree(
+        baseTree = runningBaseTreeSha,
+        entries = chunk,
+      )
+      val treeRes = createTreeRawWithRetry(
+        owner = owner,
+        repo = repo,
+        jsonBody = jsonBody,
+        isCancelled = isCancelled,
+      )
+      runningBaseTreeSha = treeRes
+      val chunkBytes = chunk.sumOf { it.originalSizeBytes }
+      if (chunkBytes > 0L) {
+        onProgressDelta(chunkBytes)
+      }
+      onLog("[GIT] Tree chunk ${idx + 1}/${allChunks.size} created (${chunk.size} entries) -> ${treeRes.take(7)}")
+    }
+    val newTreeSha = runningBaseTreeSha
+      ?: throw AppErrorException(AppError.Unknown("Missing final tree SHA"))
+
+    // Phase D: Create Single Atomic Git Commit
     val parents = listOfNotNull(snapshot.headCommitSha)
     val commitRes = api.createCommit(
       owner = owner,
@@ -429,6 +434,30 @@ class GitEngine(
     )
   }
 
+  internal fun chunkTreeEntries(entries: List<RawTreeEntry>): List<List<RawTreeEntry>> {
+    if (entries.isEmpty()) return emptyList()
+    val chunks = mutableListOf<List<RawTreeEntry>>()
+    var current = mutableListOf<RawTreeEntry>()
+    var currentBytes = 0L
+
+    for (entry in entries) {
+      val entryBytes = (entry.inlineContent?.length?.toLong() ?: 0L)
+      val exceedsLimit = current.isNotEmpty() &&
+        (current.size >= MAX_TREE_CHUNK_ENTRIES || currentBytes + entryBytes > MAX_TREE_CHUNK_BYTES)
+      if (exceedsLimit) {
+        chunks.add(current)
+        current = mutableListOf()
+        currentBytes = 0L
+      }
+      current.add(entry)
+      currentBytes += entryBytes
+    }
+    if (current.isNotEmpty()) {
+      chunks.add(current)
+    }
+    return chunks
+  }
+
   private suspend fun createBlobWithRetry(
     owner: String,
     repo: String,
@@ -443,10 +472,39 @@ class GitEngine(
         return res.body()?.sha ?: throw AppErrorException(AppError.Unknown("Missing blob SHA from GitHub"))
       }
       val code = res.code()
-      if ((code == 429 || code == 403 || code in 500..503) && attempt < 2) {
+      if ((code == 429 || code == 403 || code in 500..503) && attempt < 3) {
         attempt++
-        val retryAfterSec = res.headers()["Retry-After"]?.toLongOrNull()?.coerceIn(1L, 10L)
-        val waitMs = retryAfterSec?.times(1000L) ?: (800L * attempt)
+        val retryAfterSec = res.headers()["Retry-After"]?.toLongOrNull()?.coerceIn(1L, 15L)
+        val waitMs = retryAfterSec?.times(1000L) ?: (1000L * attempt)
+        delay(waitMs)
+        continue
+      }
+      throw AppErrorException(AppError.fromHttpStatus(code, res.errorBody()?.string()))
+    }
+  }
+
+  private suspend fun createTreeRawWithRetry(
+    owner: String,
+    repo: String,
+    jsonBody: String,
+    isCancelled: () -> Boolean,
+  ): String {
+    var attempt = 0
+    while (true) {
+      if (isCancelled()) throw AppErrorException(AppError.Unknown("Upload cancelled by user"))
+      val res = api.createTreeRaw(
+        owner = owner,
+        repo = repo,
+        body = jsonBody.toRequestBody("application/json; charset=utf-8".toMediaType()),
+      )
+      if (res.isSuccessful) {
+        return res.body()?.sha ?: throw AppErrorException(AppError.Unknown("Missing tree SHA"))
+      }
+      val code = res.code()
+      if ((code == 429 || code == 403 || code in 500..503) && attempt < 3) {
+        attempt++
+        val retryAfterSec = res.headers()["Retry-After"]?.toLongOrNull()?.coerceIn(1L, 15L)
+        val waitMs = retryAfterSec?.times(1000L) ?: (1000L * attempt)
         delay(waitMs)
         continue
       }
@@ -599,7 +657,7 @@ class GitEngine(
 
   private fun readAllBytesSafely(openStream: () -> InputStream): ByteArray {
     val out = ByteArrayOutputStream()
-    val buf = ByteArray(64 * 1024)
+    val buf = ByteArray(128 * 1024)
     openStream().use { input ->
       while (true) {
         val r = input.read(buf)

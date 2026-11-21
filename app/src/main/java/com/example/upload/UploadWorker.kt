@@ -103,7 +103,8 @@ class UploadWorker(
     fun snapshotLogs(): String = synchronized(logBuffer) { logBuffer.toString() }
 
     val uploadedBytesAtomic = AtomicLong(0L)
-    val transferStartMs = AtomicLong(0L)
+    val speedSamples = ArrayDeque<Pair<Long, Long>>()
+    var smoothedSpeed = 0.0
     var currentStage = UploadStage.PREPARING
     val totalBytes = payload.files.sumOf { it.sizeBytes }.coerceAtLeast(1L)
 
@@ -131,9 +132,28 @@ class UploadWorker(
     suspend fun persistProgress() {
       val now = System.currentTimeMillis()
       val transferred = uploadedBytesAtomic.get().coerceAtMost(totalBytes)
-      val startedAt = transferStartMs.get()
-      val elapsedSec = if (startedAt > 0L) ((now - startedAt).coerceAtLeast(250L)) / 1000.0 else 1.0
-      val speed = if (startedAt > 0L && transferred > 0L) transferred / elapsedSec else 0.0
+
+      // 4-second sliding window + EMA so displayed speed reflects real current throughput
+      // rather than monotonically decaying over total elapsed session time.
+      synchronized(speedSamples) {
+        speedSamples.addLast(now to transferred)
+        while (speedSamples.size > 2 && now - speedSamples.first().first > 4_000L) {
+          speedSamples.removeFirst()
+        }
+        val oldest = speedSamples.firstOrNull()
+        if (oldest != null && now - oldest.first >= 350L) {
+          val windowBytes = (transferred - oldest.second).coerceAtLeast(0L)
+          val dtSec = (now - oldest.first) / 1000.0
+          val windowSpeed = windowBytes / dtSec
+          smoothedSpeed = when {
+            smoothedSpeed <= 0.0 -> windowSpeed
+            windowBytes > 0L -> smoothedSpeed * 0.45 + windowSpeed * 0.55
+            else -> smoothedSpeed * 0.85
+          }
+        }
+      }
+
+      val speed = smoothedSpeed
       val remainingBytes = (totalBytes - transferred).coerceAtLeast(0L)
       val eta = if (speed > 100.0) (remainingBytes / speed).toLong() else 0L
       val pct = ((transferred.toDouble() / totalBytes.toDouble()) * 100).toInt().coerceIn(0, 99)
@@ -186,19 +206,11 @@ class UploadWorker(
             isCancelled = { isStopped },
             onStageChange = { stage ->
               currentStage = stage
-              if ((stage == UploadStage.UPLOADING || stage == UploadStage.UPLOADING_LFS) &&
-                transferStartMs.get() == 0L
-              ) {
-                transferStartMs.compareAndSet(0L, System.currentTimeMillis())
-              }
               appendLog("[STAGE] -> ${stage.name}")
               persistProgress()
             },
             onLog = { line -> appendLog(line) },
             onProgressDelta = { delta ->
-              if (transferStartMs.get() == 0L) {
-                transferStartMs.compareAndSet(0L, System.currentTimeMillis())
-              }
               uploadedBytesAtomic.addAndGet(delta)
             },
           )

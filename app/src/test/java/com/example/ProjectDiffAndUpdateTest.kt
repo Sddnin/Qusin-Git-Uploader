@@ -168,5 +168,12 @@ class ProjectDiffAndUpdateTest {
     assertNotNull(engine.tryDecodeExactUtf8("Xin chào GitHub 🚀\n".toByteArray()))
     assertNull(engine.tryDecodeExactUtf8(byteArrayOf(0x50, 0x4B, 0x03, 0x04, 0x00, 0x14)))
     assertNull(engine.tryDecodeExactUtf8(byteArrayOf(0xFF.toByte(), 0xFE.toByte(), 0x00)))
+
+    val manyEntries = (1..450).map { idx ->
+      RawTreeEntry(path = "src/File$idx.kt", inlineContent = "val x = $idx", originalSizeBytes = 12L)
+    }
+    val chunks = engine.chunkTreeEntries(manyEntries)
+    assertEquals(3, chunks.size)
+    assertEquals(450, chunks.sumOf { it.size })
   }
 }
