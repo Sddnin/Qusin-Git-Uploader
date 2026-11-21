@@ -212,3 +212,24 @@ data class PutContentRequestDto(
 data class PutContentResponseDto(
   val commit: CreateCommitResponseDto? = null,
 )
+
+@JsonClass(generateAdapter = true)
+data class GitHubReleaseAssetDto(
+  val id: Long = 0,
+  val name: String = "",
+  @Json(name = "content_type") val contentType: String = "",
+  val size: Long = 0,
+  @Json(name = "browser_download_url") val browserDownloadUrl: String = "",
+)
+
+@JsonClass(generateAdapter = true)
+data class GitHubReleaseDto(
+  @Json(name = "tag_name") val tagName: String = "",
+  val name: String? = null,
+  val body: String? = null,
+  val prerelease: Boolean = false,
+  val draft: Boolean = false,
+  @Json(name = "published_at") val publishedAt: String? = null,
+  @Json(name = "html_url") val htmlUrl: String = "",
+  val assets: List<GitHubReleaseAssetDto> = emptyList(),
+)

@@ -20,8 +20,8 @@ class SettingsDataStore(context: Context) {
   private val dataStore = context.applicationContext.qusinSettingsDataStore
 
   val settingsFlow: Flow<AppSettings> = dataStore.data.map { prefs ->
-    val langCode = prefs[KEY_LANGUAGE] ?: AppLanguage.VI.code
-    val lang = AppLanguage.entries.firstOrNull { it.code == langCode } ?: AppLanguage.VI
+    val langCode = prefs[KEY_LANGUAGE] ?: AppLanguage.SYSTEM.code
+    val lang = AppLanguage.entries.firstOrNull { it.code == langCode } ?: AppLanguage.SYSTEM
     AppSettings(
       isDarkMode = prefs[KEY_DARK_MODE] ?: true,
       language = lang,

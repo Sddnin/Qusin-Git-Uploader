@@ -205,7 +205,7 @@ data class UploadHistoryModel(
 
 data class AppSettings(
   val isDarkMode: Boolean = true,
-  val language: AppLanguage = AppLanguage.VI,
+  val language: AppLanguage = AppLanguage.SYSTEM,
   val defaultRepoFullName: String = "",
   val defaultBranch: String = "main",
   val defaultCommitMessage: String = "Update project via Qusin Git Uploader",

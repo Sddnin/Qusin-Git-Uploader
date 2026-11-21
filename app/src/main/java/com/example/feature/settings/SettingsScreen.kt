@@ -1,5 +1,9 @@
 package com.example.feature.settings
 
+import android.content.Intent
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -14,22 +18,33 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.CleaningServices
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.DeleteSweep
+import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Info
+import androidx.compose.material.icons.rounded.InstallMobile
 import androidx.compose.material.icons.rounded.Key
+import androidx.compose.material.icons.rounded.Language
+import androidx.compose.material.icons.rounded.NewReleases
+import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.SystemUpdate
+import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -37,14 +52,24 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
+import androidx.core.os.ConfigurationCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.core.common.AppLanguage
 import com.example.core.common.FormatUtils
 import com.example.core.common.LocalStrings
+import com.example.core.common.resolveAppLanguage
+import com.example.core.designsystem.CyberBadge
 import com.example.core.designsystem.GlassCard
 import com.example.core.designsystem.LocalCyberPalette
+import com.example.core.update.AppUpdateManager
+import java.util.Locale
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -56,6 +81,31 @@ fun SettingsScreen(
   val strings = LocalStrings.current
   val palette = LocalCyberPalette.current
   val s = state.settings
+  val context = LocalContext.current
+  val clipboard = LocalClipboardManager.current
+  val configuration = LocalConfiguration.current
+  val deviceLocale = ConfigurationCompat.getLocales(configuration)[0] ?: Locale.getDefault()
+  val detectedSystemLanguage = resolveAppLanguage(AppLanguage.SYSTEM, deviceLocale)
+
+  val openUrl: (String) -> Unit = { url ->
+    runCatching {
+      context.startActivity(
+        Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+      )
+    }
+  }
+  val launchApkIntent: (Intent) -> Unit = { intent ->
+    runCatching { context.startActivity(intent) }
+  }
+  val unknownSourcesPermLauncher = rememberLauncherForActivityResult(
+    contract = ActivityResultContracts.StartActivityForResult(),
+  ) {
+    viewModel.onReturnedFromInstallPermissionSetting(onLaunchApkInstaller = launchApkIntent)
+  }
+  val requestInstallPermission: (Intent) -> Unit = { intent ->
+    viewModel.notifyStatus(strings.grantInstallPermissionMsg)
+    unknownSourcesPermLauncher.launch(intent)
+  }
 
   var defaultRepo by remember(s.defaultRepoFullName) { mutableStateOf(s.defaultRepoFullName) }
   var defaultBranch by remember(s.defaultBranch) { mutableStateOf(s.defaultBranch) }
@@ -91,7 +141,7 @@ fun SettingsScreen(
       }
     }
 
-    // Appearance & Language
+    // Appearance & Multi-Language (with System Locale Auto)
     item {
       GlassCard(modifier = Modifier.fillMaxWidth()) {
         Text(strings.settingsAppearance, style = MaterialTheme.typography.titleLarge)
@@ -111,19 +161,273 @@ fun SettingsScreen(
             modifier = Modifier.testTag("settings_theme_switch"),
           )
         }
-        Spacer(Modifier.height(10.dp))
-        Text(strings.languageLabel, style = MaterialTheme.typography.labelMedium)
-        Spacer(Modifier.height(6.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Spacer(Modifier.height(12.dp))
+        Row(
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+          Icon(
+            Icons.Rounded.Language,
+            contentDescription = null,
+            tint = palette.cyanGlow,
+            modifier = Modifier.size(18.dp),
+          )
+          Text(strings.languageLabel, style = MaterialTheme.typography.labelLarge)
+        }
+        if (s.language == AppLanguage.SYSTEM) {
+          Spacer(Modifier.height(4.dp))
+          Text(
+            text = "${strings.languageSystemDesc}: ${detectedSystemLanguage.displayName}",
+            style = MaterialTheme.typography.bodySmall,
+            color = palette.cyanGlow,
+          )
+        }
+        Spacer(Modifier.height(8.dp))
+        FlowRow(
+          horizontalArrangement = Arrangement.spacedBy(8.dp),
+          verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
           AppLanguage.entries.forEach { lang ->
+            val labelText = if (lang == AppLanguage.SYSTEM) {
+              "${strings.languageSystemLabel} (${detectedSystemLanguage.displayName})"
+            } else {
+              lang.displayName
+            }
             FilterChip(
               selected = s.language == lang,
               onClick = { viewModel.setLanguage(lang) },
-              label = { Text(lang.displayName) },
+              label = { Text(labelText) },
               modifier = Modifier.testTag("lang_chip_${lang.code}"),
             )
           }
         }
+      }
+    }
+
+    // App Update & GitHub Release / Overwrite Install Card
+    item {
+      GlassCard(
+        modifier = Modifier.fillMaxWidth(),
+        glowColor = palette.cyanGlow,
+      ) {
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.CenterVertically,
+        ) {
+          Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.weight(1f),
+          ) {
+            Icon(Icons.Rounded.SystemUpdate, contentDescription = null, tint = palette.cyanGlow)
+            Text(strings.appUpdateSectionTitle, style = MaterialTheme.typography.titleMedium)
+          }
+          CyberBadge(
+            text = "v${viewModel.currentVersionName} (${viewModel.currentVersionCode})",
+            color = palette.cyanGlow,
+          )
+        }
+        Spacer(Modifier.height(8.dp))
+        Text(strings.repoLinkLabel, style = MaterialTheme.typography.labelMedium)
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+          TextButton(
+            onClick = { openUrl(AppUpdateManager.REPO_URL) },
+            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 4.dp),
+            modifier = Modifier
+              .weight(1f)
+              .testTag("settings_repo_link_btn"),
+          ) {
+            Text(
+              text = AppUpdateManager.REPO_URL,
+              style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+              color = palette.cyanGlow,
+            )
+          }
+          IconButton(
+            onClick = {
+              clipboard.setText(AnnotatedString(AppUpdateManager.REPO_URL))
+              viewModel.notifyStatus(strings.linkCopiedMsg)
+            },
+            modifier = Modifier.testTag("settings_copy_repo_link_btn"),
+          ) {
+            Icon(Icons.Rounded.ContentCopy, contentDescription = strings.copyLinkBtn, modifier = Modifier.size(18.dp))
+          }
+        }
+
+        FlowRow(
+          horizontalArrangement = Arrangement.spacedBy(8.dp),
+          verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+          OutlinedButton(
+            onClick = { openUrl(AppUpdateManager.REPO_URL) },
+            modifier = Modifier.testTag("settings_open_repo_btn"),
+          ) {
+            Icon(Icons.AutoMirrored.Rounded.OpenInNew, contentDescription = null, modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(4.dp))
+            Text(strings.openRepoBtn)
+          }
+          OutlinedButton(
+            onClick = { openUrl(AppUpdateManager.LATEST_RELEASE_URL) },
+            modifier = Modifier.testTag("settings_open_releases_btn"),
+          ) {
+            Icon(Icons.Rounded.NewReleases, contentDescription = null, modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(4.dp))
+            Text(strings.openReleasesBtn)
+          }
+          OutlinedButton(
+            onClick = { openUrl(AppUpdateManager.ACTIONS_URL) },
+            modifier = Modifier.testTag("settings_open_actions_btn"),
+          ) {
+            Icon(Icons.Rounded.Download, contentDescription = null, modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(4.dp))
+            Text(strings.openActionsBtn)
+          }
+        }
+
+        Spacer(Modifier.height(10.dp))
+        Button(
+          onClick = { viewModel.checkForAppUpdate() },
+          enabled = state.updateState !is AppUpdateUiState.Checking &&
+            state.updateState !is AppUpdateUiState.Downloading,
+          modifier = Modifier
+            .fillMaxWidth()
+            .testTag("settings_check_update_btn"),
+        ) {
+          Icon(Icons.Rounded.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
+          Spacer(Modifier.width(6.dp))
+          Text(strings.checkUpdateBtn)
+        }
+
+        when (val upd = state.updateState) {
+          AppUpdateUiState.Idle -> Unit
+          AppUpdateUiState.Checking -> {
+            Spacer(Modifier.height(10.dp))
+            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            Spacer(Modifier.height(6.dp))
+            Text(strings.checkingUpdateStatus, style = MaterialTheme.typography.bodySmall)
+          }
+          AppUpdateUiState.NoReleasesPublished -> {
+            Spacer(Modifier.height(10.dp))
+            Text(
+              text = strings.noReleasePublishedMsg,
+              style = MaterialTheme.typography.bodyMedium,
+              color = palette.warningAccent,
+            )
+          }
+          is AppUpdateUiState.ReleaseFound -> {
+            val rel = upd.release
+            Spacer(Modifier.height(10.dp))
+            Row(
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+              CyberBadge(
+                text = rel.tagName,
+                color = if (rel.isNewerThanCurrent) palette.successAccent else palette.cyanGlow,
+              )
+              Text(
+                text = if (rel.isNewerThanCurrent) strings.updateAvailableTitle else strings.upToDateMsg,
+                style = MaterialTheme.typography.titleSmall,
+                color = if (rel.isNewerThanCurrent) palette.successAccent else MaterialTheme.colorScheme.onSurface,
+              )
+            }
+            if (rel.notes.isNotBlank()) {
+              Spacer(Modifier.height(6.dp))
+              Text(
+                text = rel.notes.take(260),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+              )
+            }
+            Spacer(Modifier.height(8.dp))
+            if (rel.apkDownloadUrl != null) {
+              Button(
+                onClick = {
+                  viewModel.downloadAndInstallApk(
+                    release = rel,
+                    onNeedUnknownSourcesPermission = requestInstallPermission,
+                    onLaunchApkInstaller = launchApkIntent,
+                  )
+                },
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .testTag("settings_download_install_apk_btn"),
+              ) {
+                Icon(Icons.Rounded.InstallMobile, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(6.dp))
+                Text(
+                  "${strings.downloadAndInstallApkBtn} (${FormatUtils.formatBytes(rel.apkSizeBytes)})",
+                )
+              }
+            } else {
+              OutlinedButton(
+                onClick = { openUrl(rel.htmlUrl) },
+                modifier = Modifier.fillMaxWidth(),
+              ) {
+                Icon(Icons.AutoMirrored.Rounded.OpenInNew, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(6.dp))
+                Text(strings.openReleasesBtn)
+              }
+            }
+          }
+          is AppUpdateUiState.Downloading -> {
+            val pct = if (upd.totalBytes > 0L) {
+              (upd.downloadedBytes.toFloat() / upd.totalBytes.toFloat()).coerceIn(0f, 1f)
+            } else {
+              0f
+            }
+            Spacer(Modifier.height(10.dp))
+            Text(
+              text = "${strings.downloadingApkStatus} (${FormatUtils.formatBytes(upd.downloadedBytes)} / ${FormatUtils.formatBytes(upd.totalBytes)})",
+              style = MaterialTheme.typography.bodySmall,
+            )
+            Spacer(Modifier.height(6.dp))
+            if (upd.totalBytes > 0L) {
+              LinearProgressIndicator(progress = { pct }, modifier = Modifier.fillMaxWidth())
+            } else {
+              LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            }
+          }
+          is AppUpdateUiState.ReadyToInstall -> {
+            Spacer(Modifier.height(10.dp))
+            Button(
+              onClick = {
+                viewModel.installReadyApkIfPermitted(
+                  apkFile = upd.apkFile,
+                  onNeedUnknownSourcesPermission = requestInstallPermission,
+                  onLaunchApkInstaller = launchApkIntent,
+                )
+              },
+              modifier = Modifier
+                .fillMaxWidth()
+                .testTag("settings_install_apk_btn"),
+            ) {
+              Icon(Icons.Rounded.InstallMobile, contentDescription = null, modifier = Modifier.size(18.dp))
+              Spacer(Modifier.width(6.dp))
+              Text("${strings.installDownloadedApkBtn} (${upd.release.tagName})")
+            }
+          }
+          is AppUpdateUiState.Error -> {
+            Spacer(Modifier.height(10.dp))
+            Text(
+              text = upd.message,
+              style = MaterialTheme.typography.bodySmall,
+              color = palette.errorAccent,
+            )
+          }
+        }
+
+        Spacer(Modifier.height(8.dp))
+        Text(
+          text = strings.overwriteInstallNote,
+          style = MaterialTheme.typography.bodySmall,
+          color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
       }
     }
 
@@ -298,7 +602,7 @@ fun SettingsScreen(
         )
         Spacer(Modifier.height(6.dp))
         Text(
-          text = "com.qusin.gituploader • v1.0",
+          text = "com.qusin.gituploader • v${viewModel.currentVersionName}",
           style = MaterialTheme.typography.labelSmall,
           color = palette.cyanGlow,
         )

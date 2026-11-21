@@ -12,15 +12,16 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.core.content.ContextCompat
+import androidx.core.os.ConfigurationCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.example.core.common.AppLanguage
-import com.example.core.common.EnStrings
 import com.example.core.common.LocalStrings
-import com.example.core.common.ViStrings
+import com.example.core.common.resolveStrings
 import com.example.core.designsystem.QusinTheme
 import com.example.domain.model.AppSettings
 import com.example.navigation.QusinAppRoot
+import java.util.Locale
 
 class MainActivity : ComponentActivity() {
   override fun onCreate(savedInstanceState: Bundle?) {
@@ -32,7 +33,9 @@ class MainActivity : ComponentActivity() {
       val settings by container.settingsRepository.settings.collectAsStateWithLifecycle(
         initialValue = AppSettings(),
       )
-      val strings = if (settings.language == AppLanguage.VI) ViStrings else EnStrings
+      val configuration = LocalConfiguration.current
+      val deviceLocale = ConfigurationCompat.getLocales(configuration)[0] ?: Locale.getDefault()
+      val strings = resolveStrings(settings.language, deviceLocale)
 
       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
         val permLauncher = rememberLauncherForActivityResult(

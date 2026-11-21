@@ -13,6 +13,7 @@ import com.example.github.dto.GitBlobResponseDto
 import com.example.github.dto.GitCommitObjectDto
 import com.example.github.dto.GitHubBranchDto
 import com.example.github.dto.GitHubCommitItemDto
+import com.example.github.dto.GitHubReleaseDto
 import com.example.github.dto.GitHubRepoDto
 import com.example.github.dto.GitHubUserDto
 import com.example.github.dto.GitRefDto
@@ -196,4 +197,19 @@ interface GitHubApiService {
     @Path("repo") repo: String,
     @Path("ref", encoded = true) ref: String,
   ): Response<ResponseBody>
+
+  @Headers("Accept: application/vnd.github+json", "X-GitHub-Api-Version: 2022-11-28")
+  @GET("repos/{owner}/{repo}/releases/latest")
+  suspend fun getLatestRelease(
+    @Path("owner") owner: String,
+    @Path("repo") repo: String,
+  ): Response<GitHubReleaseDto>
+
+  @Headers("Accept: application/vnd.github+json", "X-GitHub-Api-Version: 2022-11-28")
+  @GET("repos/{owner}/{repo}/releases")
+  suspend fun listReleases(
+    @Path("owner") owner: String,
+    @Path("repo") repo: String,
+    @Query("per_page") perPage: Int = 5,
+  ): Response<List<GitHubReleaseDto>>
 }

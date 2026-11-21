@@ -9,6 +9,7 @@ import com.example.core.security.KeystoreTokenManager
 import com.example.core.security.TokenStore
 import com.example.core.storage.AppDatabase
 import com.example.core.storage.SettingsDataStore
+import com.example.core.update.AppUpdateManager
 import com.example.domain.repository.GitHubAuthRepository
 import com.example.domain.repository.GitHubRepoRepository
 import com.example.domain.repository.HistoryRepository
@@ -72,5 +73,10 @@ class AppContainer(context: Context) {
   val uploadCoordinator = UploadCoordinator(
     context = appContext,
     taskDao = database.uploadTaskDao(),
+  )
+  val appUpdateManager = AppUpdateManager(
+    context = appContext,
+    api = gitHubApiService,
+    downloadClient = networkProvider.lfsTransferClient,
   )
 }
