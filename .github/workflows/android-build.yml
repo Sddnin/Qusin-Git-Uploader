@@ -32,8 +32,12 @@ jobs:
       - name: Make gradlew executable
         run: chmod +x gradlew
 
-      - name: Ensure debug.keystore exists for CI debug signing
+      - name: Restore fixed debug.keystore for consistent overwrite-install signing
         run: |
+          if [ ! -f debug.keystore ] && [ -f debug.keystore.base64 ]; then
+            tr -d '\r\n ' < debug.keystore.base64 | base64 -d > debug.keystore
+            echo "Restored persistent debug.keystore from debug.keystore.base64"
+          fi
           if [ ! -f debug.keystore ]; then
             keytool -genkeypair -v \
               -keystore debug.keystore \
