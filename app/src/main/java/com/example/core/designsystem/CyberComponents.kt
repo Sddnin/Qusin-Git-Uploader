@@ -58,45 +58,51 @@ fun SpaceBackground(
   content: @Composable BoxScope.() -> Unit,
 ) {
   val palette = LocalCyberPalette.current
-  Box(
-    modifier = modifier
-      .fillMaxSize()
-      .background(
-        brush = Brush.verticalGradient(
-          colors = listOf(
-            palette.spaceBackdropStart,
-            palette.spaceBackdropMid,
-            palette.spaceBackdropEnd,
-          ),
+  val baseModifier = modifier
+    .fillMaxSize()
+    .background(
+      brush = Brush.verticalGradient(
+        colors = listOf(
+          palette.spaceBackdropStart,
+          palette.spaceBackdropMid,
+          palette.spaceBackdropEnd,
         ),
-      )
-      .drawBehind {
-        // Subtle orbital radial glows in top-left (cyan) and bottom-right (purple)
-        drawCircle(
-          brush = Brush.radialGradient(
-            colors = listOf(
-              palette.cyanGlow.copy(alpha = if (palette.isDark) 0.12f else 0.08f),
-              Color.Transparent,
-            ),
-            center = Offset(size.width * 0.15f, size.height * 0.08f),
-            radius = size.maxDimension * 0.45f,
+      ),
+    )
+
+  val decoratedModifier = if (palette.isDark) {
+    baseModifier
+  } else {
+    baseModifier.drawBehind {
+      drawCircle(
+        brush = Brush.radialGradient(
+          colors = listOf(
+            palette.cyanGlow.copy(alpha = 0.08f),
+            Color.Transparent,
           ),
           center = Offset(size.width * 0.15f, size.height * 0.08f),
           radius = size.maxDimension * 0.45f,
-        )
-        drawCircle(
-          brush = Brush.radialGradient(
-            colors = listOf(
-              palette.purpleGlow.copy(alpha = if (palette.isDark) 0.13f else 0.07f),
-              Color.Transparent,
-            ),
-            center = Offset(size.width * 0.9f, size.height * 0.85f),
-            radius = size.maxDimension * 0.5f,
+        ),
+        center = Offset(size.width * 0.15f, size.height * 0.08f),
+        radius = size.maxDimension * 0.45f,
+      )
+      drawCircle(
+        brush = Brush.radialGradient(
+          colors = listOf(
+            palette.purpleGlow.copy(alpha = 0.06f),
+            Color.Transparent,
           ),
           center = Offset(size.width * 0.9f, size.height * 0.85f),
           radius = size.maxDimension * 0.5f,
-        )
-      },
+        ),
+        center = Offset(size.width * 0.9f, size.height * 0.85f),
+        radius = size.maxDimension * 0.5f,
+      )
+    }
+  }
+
+  Box(
+    modifier = decoratedModifier,
     content = content,
   )
 }
@@ -104,30 +110,42 @@ fun SpaceBackground(
 @Composable
 fun GlassCard(
   modifier: Modifier = Modifier,
-  shape: Shape = RoundedCornerShape(20.dp),
+  shape: Shape = RoundedCornerShape(14.dp),
   glowColor: Color? = null,
   onClick: (() -> Unit)? = null,
   contentPadding: PaddingValues = PaddingValues(16.dp),
   content: @Composable ColumnScope.() -> Unit,
 ) {
   val palette = LocalCyberPalette.current
-  val borderBrush = Brush.linearGradient(
-    colors = listOf(
-      (glowColor ?: palette.cyanGlow).copy(alpha = if (palette.isDark) 0.55f else 0.35f),
-      palette.purpleGlow.copy(alpha = if (palette.isDark) 0.30f else 0.20f),
-    ),
-  )
+  val borderModifier = if (palette.isDark) {
+    val borderColor = glowColor?.copy(alpha = 0.55f) ?: palette.glassBorder
+    Modifier.border(width = 1.dp, color = borderColor, shape = shape)
+  } else {
+    val borderBrush = Brush.linearGradient(
+      colors = listOf(
+        (glowColor ?: palette.cyanGlow).copy(alpha = 0.35f),
+        palette.purpleGlow.copy(alpha = 0.18f),
+      ),
+    )
+    Modifier.border(width = 1.dp, brush = borderBrush, shape = shape)
+  }
+
+  val shadowModifier = if (palette.isDark) {
+    Modifier
+  } else {
+    Modifier.shadow(
+      elevation = 3.dp,
+      shape = shape,
+      ambientColor = (glowColor ?: palette.cyanGlow).copy(alpha = 0.18f),
+      spotColor = palette.purpleGlow.copy(alpha = 0.14f),
+    )
+  }
 
   val cardModifier = modifier
-    .shadow(
-      elevation = if (palette.isDark) 10.dp else 4.dp,
-      shape = shape,
-      ambientColor = (glowColor ?: palette.cyanGlow).copy(alpha = 0.28f),
-      spotColor = palette.purpleGlow.copy(alpha = 0.25f),
-    )
+    .then(shadowModifier)
     .clip(shape)
     .background(palette.glassFill)
-    .border(width = 1.dp, brush = borderBrush, shape = shape)
+    .then(borderModifier)
     .let { mod -> if (onClick != null) mod.clickable(onClick = onClick) else mod }
     .padding(contentPadding)
 
@@ -186,27 +204,28 @@ fun StatusBeacon(
 fun CyberGradientProgressBar(
   progress: Float,
   modifier: Modifier = Modifier,
-  height: Dp = 8.dp,
+  height: Dp = 6.dp,
 ) {
   val palette = LocalCyberPalette.current
   val clamped = progress.coerceIn(0f, 1f)
+  val fillColors = if (palette.isDark) {
+    listOf(CyberBlue, palette.cyanGlow)
+  } else {
+    listOf(palette.cyanGlow, CyberBlue, palette.purpleGlow)
+  }
   Box(
     modifier = modifier
       .fillMaxWidth()
       .height(height)
       .clip(CircleShape)
-      .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)),
+      .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.75f)),
   ) {
     Box(
       modifier = Modifier
         .fillMaxWidth(clamped)
         .height(height)
         .clip(CircleShape)
-        .background(
-          brush = Brush.horizontalGradient(
-            colors = listOf(palette.cyanGlow, CyberBlue, palette.purpleGlow),
-          ),
-        ),
+        .background(brush = Brush.horizontalGradient(colors = fillColors)),
     )
   }
 }
@@ -214,7 +233,7 @@ fun CyberGradientProgressBar(
 @Composable
 fun SkeletonShimmerBox(
   modifier: Modifier = Modifier,
-  shape: Shape = RoundedCornerShape(14.dp),
+  shape: Shape = RoundedCornerShape(12.dp),
 ) {
   val palette = LocalCyberPalette.current
   val transition = rememberInfiniteTransition(label = "shimmer")
@@ -227,8 +246,8 @@ fun SkeletonShimmerBox(
     ),
     label = "shift",
   )
-  val baseColor = if (palette.isDark) Color(0xFF15203B) else Color(0xFFE2E8F0)
-  val highlightColor = if (palette.isDark) Color(0xFF23345D) else Color(0xFFF8FAFC)
+  val baseColor = if (palette.isDark) Color(0xFF161B22) else Color(0xFFE2E8F0)
+  val highlightColor = if (palette.isDark) Color(0xFF22272E) else Color(0xFFF8FAFC)
   Box(
     modifier = modifier
       .clip(shape)
@@ -250,14 +269,14 @@ fun CyberBadge(
 ) {
   Surface(
     modifier = modifier,
-    shape = RoundedCornerShape(8.dp),
-    color = color.copy(alpha = 0.16f),
-    border = BorderStroke(1.dp, color.copy(alpha = 0.45f)),
+    shape = RoundedCornerShape(6.dp),
+    color = color.copy(alpha = 0.14f),
+    border = BorderStroke(1.dp, color.copy(alpha = 0.35f)),
   ) {
     Text(
       text = text,
       style = MaterialTheme.typography.labelSmall,
-      fontWeight = FontWeight.Bold,
+      fontWeight = FontWeight.SemiBold,
       color = color,
       modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
       maxLines = 1,

@@ -173,7 +173,6 @@ fun UpdateProjectScreen(
           Spacer(Modifier.height(10.dp))
           GlassCard(
             modifier = Modifier.fillMaxWidth(),
-            glowColor = if (state.stripZipRootFolder) palette.cyanGlow else palette.warningAccent,
             contentPadding = PaddingValues(10.dp),
           ) {
             Row(
@@ -281,7 +280,6 @@ fun UpdateProjectScreen(
       item {
         GlassCard(
           modifier = Modifier.fillMaxWidth(),
-          glowColor = palette.purpleGlow,
         ) {
           Text(strings.updateStepDiffPreview, style = MaterialTheme.typography.titleMedium, color = palette.cyanGlow)
           Spacer(Modifier.height(8.dp))
@@ -360,7 +358,7 @@ fun UpdateProjectScreen(
                 .testTag("execute_update_button"),
               colors = ButtonDefaults.buttonColors(
                 containerColor = palette.cyanGlow,
-                contentColor = Color(0xFF050811),
+                contentColor = Color(0xFF08111E),
               ),
             ) {
               Icon(Icons.Rounded.RocketLaunch, contentDescription = null)
@@ -388,7 +386,7 @@ fun UpdateProjectScreen(
 
         GlassCard(
           modifier = Modifier.fillMaxWidth(),
-          glowColor = if (item.status == DiffStatus.UNCHANGED) null else badgeColor,
+          glowColor = if (item.status == DiffStatus.DELETED) palette.errorAccent else null,
           contentPadding = PaddingValues(12.dp),
         ) {
           Row(

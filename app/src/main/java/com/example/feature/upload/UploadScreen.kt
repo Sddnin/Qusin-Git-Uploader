@@ -1,7 +1,5 @@
 package com.example.feature.upload
 
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -21,12 +19,8 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
-import androidx.compose.material.icons.rounded.Archive
 import androidx.compose.material.icons.rounded.Close
-import androidx.compose.material.icons.rounded.CreateNewFolder
 import androidx.compose.material.icons.rounded.FolderZip
-import androidx.compose.material.icons.rounded.InsertDriveFile
-import androidx.compose.material.icons.rounded.LibraryAdd
 import androidx.compose.material.icons.rounded.RocketLaunch
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -35,9 +29,7 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -76,22 +68,6 @@ fun UploadScreen(
 
   var newExcludeInput by remember { mutableStateOf("") }
 
-  val singleFileLauncher = rememberLauncherForActivityResult(
-    contract = ActivityResultContracts.OpenDocument(),
-  ) { uri -> uri?.let { viewModel.onSingleOrMultiFilesPicked(listOf(it)) } }
-
-  val multiFileLauncher = rememberLauncherForActivityResult(
-    contract = ActivityResultContracts.OpenMultipleDocuments(),
-  ) { uris -> if (uris.isNotEmpty()) viewModel.onSingleOrMultiFilesPicked(uris) }
-
-  val folderLauncher = rememberLauncherForActivityResult(
-    contract = ActivityResultContracts.OpenDocumentTree(),
-  ) { uri -> uri?.let { viewModel.onFolderPicked(it) } }
-
-  val zipLauncher = rememberLauncherForActivityResult(
-    contract = ActivityResultContracts.OpenDocument(),
-  ) { uri -> uri?.let { viewModel.onZipPicked(it) } }
-
   LazyColumn(
     modifier = Modifier
       .fillMaxSize()
@@ -99,71 +75,20 @@ fun UploadScreen(
     contentPadding = PaddingValues(16.dp),
     verticalArrangement = Arrangement.spacedBy(14.dp),
   ) {
-    // Step 1: Source Selection (SAF)
+    // Step 1: System File Picker Component (Source code, Archives, APKs, Folders)
     item {
-      GlassCard(modifier = Modifier.fillMaxWidth()) {
-        Text(strings.uploadWorkbench, style = MaterialTheme.typography.headlineSmall)
-        Spacer(Modifier.height(4.dp))
-        Text(strings.step1SelectSource, style = MaterialTheme.typography.titleMedium, color = palette.cyanGlow)
-        Spacer(Modifier.height(10.dp))
-
-        Row(
-          modifier = Modifier.fillMaxWidth(),
-          horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-          OutlinedButton(
-            onClick = { folderLauncher.launch(null) },
-            modifier = Modifier
-              .weight(1f)
-              .testTag("pick_folder_btn"),
-          ) {
-            Icon(Icons.Rounded.CreateNewFolder, contentDescription = null, modifier = Modifier.size(18.dp))
-            Spacer(Modifier.width(6.dp))
-            Text(strings.pickProjectFolder, maxLines = 1, overflow = TextOverflow.Ellipsis)
-          }
-          OutlinedButton(
-            onClick = { zipLauncher.launch(arrayOf("application/zip", "application/x-zip-compressed", "*/*")) },
-            modifier = Modifier
-              .weight(1f)
-              .testTag("pick_zip_btn"),
-          ) {
-            Icon(Icons.Rounded.Archive, contentDescription = null, modifier = Modifier.size(18.dp))
-            Spacer(Modifier.width(6.dp))
-            Text(strings.pickZipArchive, maxLines = 1, overflow = TextOverflow.Ellipsis)
-          }
-        }
-        Spacer(Modifier.height(8.dp))
-        Row(
-          modifier = Modifier.fillMaxWidth(),
-          horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-          OutlinedButton(
-            onClick = { singleFileLauncher.launch(arrayOf("*/*")) },
-            modifier = Modifier
-              .weight(1f)
-              .testTag("pick_single_file_btn"),
-          ) {
-            Icon(Icons.Rounded.InsertDriveFile, contentDescription = null, modifier = Modifier.size(18.dp))
-            Spacer(Modifier.width(6.dp))
-            Text(strings.pickSingleFile, maxLines = 1, overflow = TextOverflow.Ellipsis)
-          }
-          OutlinedButton(
-            onClick = { multiFileLauncher.launch(arrayOf("*/*")) },
-            modifier = Modifier
-              .weight(1f)
-              .testTag("pick_multi_file_btn"),
-          ) {
-            Icon(Icons.Rounded.LibraryAdd, contentDescription = null, modifier = Modifier.size(18.dp))
-            Spacer(Modifier.width(6.dp))
-            Text(strings.pickMultipleFiles, maxLines = 1, overflow = TextOverflow.Ellipsis)
-          }
-        }
-
-        if (state.isScanning) {
-          Spacer(Modifier.height(10.dp))
-          LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-        }
-      }
+      DeviceFileSelectionComponent(
+        selectedCategory = state.selectedPickerCategory,
+        onSelectCategory = viewModel::selectPickerCategory,
+        onFilesPicked = viewModel::onSingleOrMultiFilesPicked,
+        onArchivePicked = viewModel::onZipPicked,
+        onFolderPicked = viewModel::onFolderPicked,
+        isScanning = state.isScanning,
+        stagedFileCount = state.selectedCount,
+        stagedTotalBytes = state.selectedTotalBytes,
+        stagedLfsCount = state.lfsCount,
+        strings = strings,
+      )
     }
 
     // ZIP Mode A / Mode B Chooser
@@ -172,7 +97,6 @@ fun UploadScreen(
       item {
         GlassCard(
           modifier = Modifier.fillMaxWidth(),
-          glowColor = palette.purpleGlow,
         ) {
           Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Icon(Icons.Rounded.FolderZip, contentDescription = null, tint = palette.purpleGlow)
@@ -269,7 +193,6 @@ fun UploadScreen(
             Spacer(Modifier.height(10.dp))
             GlassCard(
               modifier = Modifier.fillMaxWidth(),
-              glowColor = if (state.stripZipRootFolder) palette.cyanGlow else palette.warningAccent,
               contentPadding = PaddingValues(10.dp),
             ) {
               Row(
@@ -419,7 +342,6 @@ fun UploadScreen(
     item {
       GlassCard(
         modifier = Modifier.fillMaxWidth(),
-        glowColor = palette.cyanGlow,
       ) {
         Text(strings.step3TargetAndPush, style = MaterialTheme.typography.titleMedium, color = palette.cyanGlow)
         Spacer(Modifier.height(10.dp))
@@ -495,7 +417,7 @@ fun UploadScreen(
             .testTag("start_upload_button"),
           colors = ButtonDefaults.buttonColors(
             containerColor = palette.cyanGlow,
-            contentColor = Color(0xFF050811),
+            contentColor = Color(0xFF08111E),
           ),
         ) {
           Icon(Icons.Rounded.RocketLaunch, contentDescription = null)

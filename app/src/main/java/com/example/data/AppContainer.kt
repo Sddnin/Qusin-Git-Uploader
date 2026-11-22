@@ -1,10 +1,12 @@
 package com.example.data
 
 import android.content.Context
+import android.net.Uri
 import androidx.room.Room
 import com.example.core.common.AppDispatchers
 import com.example.core.common.DefaultAppDispatchers
 import com.example.core.network.NetworkClientProvider
+import com.example.core.security.GitHubOAuthManager
 import com.example.core.security.KeystoreTokenManager
 import com.example.core.security.TokenStore
 import com.example.core.storage.AppDatabase
@@ -22,6 +24,10 @@ import com.example.gitlfs.GitLfsEngine
 import com.example.upload.SafFileScanner
 import com.example.upload.UploadCoordinator
 import com.example.upload.ZipManager
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 
 class AppContainer(context: Context) {
   val appContext: Context = context.applicationContext
@@ -30,6 +36,23 @@ class AppContainer(context: Context) {
   val tokenStore: TokenStore = KeystoreTokenManager(appContext)
   val networkProvider = NetworkClientProvider(tokenStore)
   val gitHubApiService: GitHubApiService = networkProvider.retrofit.create(GitHubApiService::class.java)
+  val oauthManager = GitHubOAuthManager(
+    context = appContext,
+    httpClient = networkProvider.lfsTransferClient,
+    moshi = networkProvider.moshi,
+  )
+
+  private val _oauthCallbacks = MutableSharedFlow<Uri>(
+    replay = 1,
+    onBufferOverflow = BufferOverflow.DROP_OLDEST,
+  )
+  val oauthCallbacks: SharedFlow<Uri> = _oauthCallbacks.asSharedFlow()
+
+  fun dispatchOAuthCallback(uri: Uri?) {
+    if (GitHubOAuthManager.isOAuthCallbackUri(uri) && uri != null) {
+      _oauthCallbacks.tryEmit(uri)
+    }
+  }
 
   val database: AppDatabase = Room.databaseBuilder(
     appContext,
@@ -48,6 +71,7 @@ class AppContainer(context: Context) {
     api = gitHubApiService,
     tokenStore = tokenStore,
     dispatchers = dispatchers,
+    oauthManager = oauthManager,
   )
   val gitHubAuthRepository: GitHubAuthRepository = gitHubRepoImpl
   val gitHubRepoRepository: GitHubRepoRepository = gitHubRepoImpl

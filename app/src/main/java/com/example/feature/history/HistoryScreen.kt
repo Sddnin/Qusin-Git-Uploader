@@ -173,7 +173,7 @@ fun HistoryScreen(
         val ok = item.status == UploadStage.COMPLETED
         GlassCard(
           modifier = Modifier.fillMaxWidth(),
-          glowColor = if (ok) palette.successAccent else palette.errorAccent,
+          glowColor = if (item.status == UploadStage.FAILED) palette.errorAccent else null,
         ) {
           Row(
             modifier = Modifier.fillMaxWidth(),

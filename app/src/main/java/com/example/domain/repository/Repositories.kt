@@ -1,5 +1,6 @@
 package com.example.domain.repository
 
+import android.net.Uri
 import com.example.core.common.AppLanguage
 import com.example.core.common.AppResult
 import com.example.domain.model.AppSettings
@@ -15,6 +16,7 @@ interface GitHubAuthRepository {
   val currentUser: Flow<GitHubUser?>
   suspend fun hasSavedToken(): Boolean
   suspend fun validateAndSaveToken(token: String): AppResult<GitHubUser>
+  suspend fun completeOAuthLogin(callbackUri: Uri): AppResult<GitHubUser>
   suspend fun refreshSavedSession(): AppResult<GitHubUser>
   suspend fun disconnect(clearCredentials: Boolean)
 }

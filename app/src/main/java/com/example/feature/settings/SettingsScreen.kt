@@ -208,7 +208,6 @@ fun SettingsScreen(
     item {
       GlassCard(
         modifier = Modifier.fillMaxWidth(),
-        glowColor = palette.cyanGlow,
       ) {
         Row(
           modifier = Modifier.fillMaxWidth(),
@@ -589,9 +588,9 @@ fun SettingsScreen(
 
     // About App
     item {
-      GlassCard(modifier = Modifier.fillMaxWidth(), glowColor = palette.purpleGlow) {
+      GlassCard(modifier = Modifier.fillMaxWidth()) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-          Icon(Icons.Rounded.Info, contentDescription = null, tint = palette.purpleGlow)
+          Icon(Icons.Rounded.Info, contentDescription = null, tint = palette.cyanGlow)
           Text(strings.aboutAppTitle, style = MaterialTheme.typography.titleMedium)
         }
         Spacer(Modifier.height(6.dp))

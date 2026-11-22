@@ -2,28 +2,28 @@ package com.example.core.designsystem
 
 import androidx.compose.ui.graphics.Color
 
-// Deep Space Dark Palette
-val DeepSpaceBlack = Color(0xFF050811)
-val MidnightNavy = Color(0xFF0B1122)
-val SpaceSurface = Color(0xFF10182E)
-val SpaceSurfaceElevated = Color(0xFF17223F)
-val GlassCardDark = Color(0xCC111A33)
-val GlassBorderDark = Color(0x4D00F0FF)
+// Carbon Developer Dark Palette (GitHub / Linear inspired)
+val DeepSpaceBlack = Color(0xFF0D1117)
+val MidnightNavy = Color(0xFF161B22)
+val SpaceSurface = Color(0xFF1C2128)
+val SpaceSurfaceElevated = Color(0xFF22272E)
+val GlassCardDark = Color(0xFF161B22)
+val GlassBorderDark = Color(0xFF30363D)
 
-// Electric Neon Accents
-val ElectricCyan = Color(0xFF00F0FF)
-val CyberBlue = Color(0xFF3B82F6)
-val DeepRoyalBlue = Color(0xFF1D4ED8)
-val NeonPurple = Color(0xFFA855F7)
-val DeepViolet = Color(0xFF6D28D9)
-val EmeraldMatrix = Color(0xFF10B981)
-val SolarAmber = Color(0xFFF59E0B)
-val CrimsonAlert = Color(0xFFEF4444)
+// Refined Developer Accents
+val ElectricCyan = Color(0xFF58A6FF)
+val CyberBlue = Color(0xFF2F81F7)
+val DeepRoyalBlue = Color(0xFF1F6FEB)
+val NeonPurple = Color(0xFFA371F7)
+val DeepViolet = Color(0xFF6E40C9)
+val EmeraldMatrix = Color(0xFF3FB950)
+val SolarAmber = Color(0xFFD29922)
+val CrimsonAlert = Color(0xFFF85149)
 
 // Text Colors (Dark)
-val StarlightWhite = Color(0xFFF1F5F9)
-val NebulaGray = Color(0xFF94A3B8)
-val DimSlate = Color(0xFF64748B)
+val StarlightWhite = Color(0xFFE6EDF3)
+val NebulaGray = Color(0xFF8B949E)
+val DimSlate = Color(0xFF6E7681)
 
 // Space Lab Light Palette (Crisp futuristic daytime aerospace UI)
 val LabFrostBackground = Color(0xFFF3F7FE)

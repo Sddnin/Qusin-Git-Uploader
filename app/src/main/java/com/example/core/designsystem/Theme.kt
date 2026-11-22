@@ -30,8 +30,8 @@ data class CyberPalette(
 val DarkCyberPalette = CyberPalette(
   isDark = true,
   spaceBackdropStart = DeepSpaceBlack,
-  spaceBackdropMid = MidnightNavy,
-  spaceBackdropEnd = Color(0xFF0A0F24),
+  spaceBackdropMid = DeepSpaceBlack,
+  spaceBackdropEnd = Color(0xFF0A0D12),
   glassFill = GlassCardDark,
   glassBorder = GlassBorderDark,
   cyanGlow = ElectricCyan,
@@ -39,8 +39,8 @@ val DarkCyberPalette = CyberPalette(
   successAccent = EmeraldMatrix,
   warningAccent = SolarAmber,
   errorAccent = CrimsonAlert,
-  terminalBg = Color(0xFF04070F),
-  terminalText = Color(0xFF7DD3FC),
+  terminalBg = Color(0xFF090C10),
+  terminalText = Color(0xFFC9D1D9),
 )
 
 val LightCyberPalette = CyberPalette(
@@ -63,27 +63,27 @@ val LocalCyberPalette = staticCompositionLocalOf { DarkCyberPalette }
 
 private val QusinDarkColorScheme = darkColorScheme(
   primary = ElectricCyan,
-  onPrimary = DeepSpaceBlack,
-  primaryContainer = Color(0xFF093647),
-  onPrimaryContainer = Color(0xFFA5F8FF),
-  secondary = NeonPurple,
-  onSecondary = StarlightWhite,
-  secondaryContainer = Color(0xFF2D174D),
-  onSecondaryContainer = Color(0xFFE9D5FF),
+  onPrimary = Color(0xFF08111E),
+  primaryContainer = Color(0xFF1F334D),
+  onPrimaryContainer = Color(0xFFDCEBFF),
+  secondary = NebulaGray,
+  onSecondary = DeepSpaceBlack,
+  secondaryContainer = SpaceSurfaceElevated,
+  onSecondaryContainer = StarlightWhite,
   tertiary = CyberBlue,
-  onTertiary = StarlightWhite,
+  onTertiary = Color.White,
   background = DeepSpaceBlack,
   onBackground = StarlightWhite,
   surface = MidnightNavy,
   onSurface = StarlightWhite,
   surfaceVariant = SpaceSurface,
   onSurfaceVariant = NebulaGray,
-  surfaceContainer = SpaceSurface,
+  surfaceContainer = MidnightNavy,
   surfaceContainerHigh = SpaceSurfaceElevated,
-  outline = Color(0xFF2B3B5E),
-  outlineVariant = Color(0xFF1D2842),
+  outline = GlassBorderDark,
+  outlineVariant = Color(0xFF21262D),
   error = CrimsonAlert,
-  onError = StarlightWhite,
+  onError = Color.White,
 )
 
 private val QusinLightColorScheme = lightColorScheme(
@@ -112,11 +112,11 @@ private val QusinLightColorScheme = lightColorScheme(
 )
 
 private val QusinShapes = Shapes(
-  extraSmall = RoundedCornerShape(8.dp),
-  small = RoundedCornerShape(12.dp),
-  medium = RoundedCornerShape(18.dp),
-  large = RoundedCornerShape(24.dp),
-  extraLarge = RoundedCornerShape(30.dp),
+  extraSmall = RoundedCornerShape(6.dp),
+  small = RoundedCornerShape(8.dp),
+  medium = RoundedCornerShape(12.dp),
+  large = RoundedCornerShape(16.dp),
+  extraLarge = RoundedCornerShape(20.dp),
 )
 
 @Composable

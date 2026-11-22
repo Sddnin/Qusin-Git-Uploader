@@ -109,31 +109,38 @@ fun DashboardScreen(
           Box(
             modifier = Modifier
               .fillMaxWidth()
-              .height(176.dp),
+              .then(if (palette.isDark) Modifier else Modifier.height(176.dp)),
           ) {
-            Image(
-              painter = painterResource(id = R.drawable.img_cyber_hero_banner),
-              contentDescription = strings.appName,
-              contentScale = ContentScale.Crop,
-              modifier = Modifier.fillMaxSize(),
-            )
-            Box(
-              modifier = Modifier
-                .fillMaxSize()
-                .background(
-                  Brush.verticalGradient(
-                    colors = listOf(
-                      Color(0x66050811),
-                      Color(0xE6080E1E),
+            if (!palette.isDark) {
+              Image(
+                painter = painterResource(id = R.drawable.img_cyber_hero_banner),
+                contentDescription = strings.appName,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+              )
+              Box(
+                modifier = Modifier
+                  .fillMaxSize()
+                  .background(
+                    Brush.verticalGradient(
+                      colors = listOf(
+                        Color(0x66050811),
+                        Color(0xE6080E1E),
+                      ),
                     ),
                   ),
-                ),
-            )
+              )
+            }
+            val heroTitleColor = if (palette.isDark) MaterialTheme.colorScheme.onSurface else Color.White
+            val heroSubColor = if (palette.isDark) MaterialTheme.colorScheme.onSurfaceVariant else Color(0xFFCBD5E1)
+            val heroPromptColor = if (palette.isDark) MaterialTheme.colorScheme.onSurfaceVariant else Color(0xFFE2E8F0)
+
             Column(
               modifier = Modifier
-                .fillMaxSize()
+                .fillMaxWidth()
+                .then(if (palette.isDark) Modifier else Modifier.fillMaxSize())
                 .padding(18.dp),
-              verticalArrangement = Arrangement.SpaceBetween,
+              verticalArrangement = if (palette.isDark) Arrangement.spacedBy(14.dp) else Arrangement.SpaceBetween,
             ) {
               Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -143,6 +150,7 @@ fun DashboardScreen(
                 Row(
                   verticalAlignment = Alignment.CenterVertically,
                   horizontalArrangement = Arrangement.spacedBy(12.dp),
+                  modifier = Modifier.weight(1f),
                 ) {
                   if (state.user?.avatarUrl != null) {
                     AsyncImage(
@@ -150,9 +158,24 @@ fun DashboardScreen(
                       contentDescription = state.user?.login,
                       contentScale = ContentScale.Crop,
                       modifier = Modifier
-                        .size(48.dp)
+                        .size(46.dp)
                         .clip(CircleShape),
                     )
+                  } else if (palette.isDark) {
+                    Box(
+                      modifier = Modifier
+                        .size(46.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(palette.cyanGlow.copy(alpha = 0.14f)),
+                      contentAlignment = Alignment.Center,
+                    ) {
+                      Icon(
+                        imageVector = Icons.Rounded.CloudUpload,
+                        contentDescription = strings.appName,
+                        tint = palette.cyanGlow,
+                        modifier = Modifier.size(24.dp),
+                      )
+                    }
                   } else {
                     Image(
                       painter = painterResource(id = R.drawable.img_avatar_placeholder),
@@ -167,19 +190,20 @@ fun DashboardScreen(
                     Text(
                       text = state.user?.let { "@${it.login}" } ?: strings.appName,
                       style = MaterialTheme.typography.titleLarge,
-                      color = Color.White,
+                      color = heroTitleColor,
                       maxLines = 1,
                       overflow = TextOverflow.Ellipsis,
                     )
                     Text(
                       text = state.user?.name ?: strings.orbitalUplinkReady,
                       style = MaterialTheme.typography.bodyMedium,
-                      color = Color(0xFFCBD5E1),
+                      color = heroSubColor,
                       maxLines = 1,
                       overflow = TextOverflow.Ellipsis,
                     )
                   }
                 }
+                Spacer(Modifier.width(8.dp))
                 StatusBeacon(
                   active = state.user != null,
                   label = if (state.user != null) strings.connectedStatus else strings.disconnectedStatus,
@@ -195,7 +219,7 @@ fun DashboardScreen(
                   Text(
                     text = strings.connectGithubPrompt,
                     style = MaterialTheme.typography.bodyMedium,
-                    color = Color(0xFFE2E8F0),
+                    color = heroPromptColor,
                     modifier = Modifier.weight(1f),
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
@@ -206,10 +230,10 @@ fun DashboardScreen(
                     modifier = Modifier.testTag("dashboard_connect_button"),
                     colors = ButtonDefaults.buttonColors(
                       containerColor = palette.cyanGlow,
-                      contentColor = Color(0xFF050811),
+                      contentColor = Color(0xFF08111E),
                     ),
                   ) {
-                    Text(strings.connectNow, fontWeight = FontWeight.Bold)
+                    Text(strings.connectNow, fontWeight = FontWeight.SemiBold)
                   }
                 }
               } else if (state.isConnecting) {
@@ -314,7 +338,7 @@ fun DashboardScreen(
       item {
         GlassCard(
           modifier = Modifier.fillMaxWidth(),
-          glowColor = if (state.activeTasks.isNotEmpty()) palette.cyanGlow else palette.purpleGlow,
+          glowColor = if (state.activeTasks.isNotEmpty()) palette.cyanGlow else null,
         ) {
           Row(
             modifier = Modifier.fillMaxWidth(),
@@ -327,7 +351,7 @@ fun DashboardScreen(
             )
             CyberBadge(
               text = "${state.activeTasks.size} active",
-              color = if (state.activeTasks.isNotEmpty()) palette.cyanGlow else palette.purpleGlow,
+              color = if (state.activeTasks.isNotEmpty()) palette.cyanGlow else MaterialTheme.colorScheme.onSurfaceVariant,
             )
           }
           Spacer(Modifier.height(10.dp))
@@ -400,6 +424,7 @@ fun DashboardScreen(
           style = MaterialTheme.typography.titleLarge,
         )
         Spacer(Modifier.height(10.dp))
+        val mutedInk = MaterialTheme.colorScheme.onSurfaceVariant
         val actions = listOf(
           QuickActionItem(strings.actionUploadProject, Icons.Rounded.RocketLaunch, palette.cyanGlow, "qa_upload_project") {
             onNavigateUpload(UploadQuickLaunchMode.PROJECT)
@@ -408,15 +433,15 @@ fun DashboardScreen(
           QuickActionItem(strings.actionUploadZip, Icons.Rounded.Archive, palette.purpleGlow, "qa_upload_zip") {
             onNavigateUpload(UploadQuickLaunchMode.ZIP)
           },
-          QuickActionItem(strings.actionSelectFolder, Icons.Rounded.CreateNewFolder, palette.successAccent, "qa_select_folder") {
+          QuickActionItem(strings.actionSelectFolder, Icons.Rounded.CreateNewFolder, palette.cyanGlow, "qa_select_folder") {
             onNavigateUpload(UploadQuickLaunchMode.FOLDER)
           },
-          QuickActionItem(strings.actionSelectFiles, Icons.Rounded.InsertDriveFile, Color(0xFF38BDF8), "qa_select_files") {
+          QuickActionItem(strings.actionSelectFiles, Icons.Rounded.InsertDriveFile, palette.cyanGlow, "qa_select_files") {
             onNavigateUpload(UploadQuickLaunchMode.FILES)
           },
           QuickActionItem(strings.actionRepoManager, Icons.Rounded.AccountTree, palette.warningAccent, "qa_repo_manager", onNavigateRepos),
-          QuickActionItem(strings.actionUploadHistory, Icons.Rounded.History, Color(0xFF818CF8), "qa_upload_history", onNavigateHistory),
-          QuickActionItem(strings.actionSettings, Icons.Rounded.Settings, Color(0xFFA78BFA), "qa_settings", onNavigateSettings),
+          QuickActionItem(strings.actionUploadHistory, Icons.Rounded.History, mutedInk, "qa_upload_history", onNavigateHistory),
+          QuickActionItem(strings.actionSettings, Icons.Rounded.Settings, mutedInk, "qa_settings", onNavigateSettings),
         )
 
         val columns = if (isWide) 4 else 2
@@ -432,22 +457,21 @@ fun DashboardScreen(
                   modifier = Modifier
                     .weight(1f)
                     .testTag(action.tag),
-                  glowColor = action.color,
                   onClick = action.onClick,
                   contentPadding = PaddingValues(14.dp),
                 ) {
                   Box(
                     modifier = Modifier
-                      .size(38.dp)
+                      .size(36.dp)
                       .clip(RoundedCornerShape(10.dp))
-                      .background(action.color.copy(alpha = 0.16f)),
+                      .background(action.color.copy(alpha = 0.12f)),
                     contentAlignment = Alignment.Center,
                   ) {
                     Icon(
                       imageVector = action.icon,
                       contentDescription = action.title,
                       tint = action.color,
-                      modifier = Modifier.size(22.dp),
+                      modifier = Modifier.size(20.dp),
                     )
                   }
                   Spacer(Modifier.height(10.dp))
@@ -542,7 +566,7 @@ fun DashboardScreen(
               val ok = item.status == UploadStage.COMPLETED
               GlassCard(
                 modifier = Modifier.fillMaxWidth(),
-                glowColor = if (ok) palette.successAccent else palette.errorAccent,
+                glowColor = if (ok) null else palette.errorAccent,
                 onClick = onNavigateHistory,
               ) {
                 Row(
@@ -573,7 +597,6 @@ fun DashboardScreen(
       item {
         GlassCard(
           modifier = Modifier.fillMaxWidth(),
-          glowColor = palette.cyanGlow,
           contentPadding = PaddingValues(12.dp),
         ) {
           Row(
@@ -586,7 +609,7 @@ fun DashboardScreen(
               tint = palette.cyanGlow,
             )
             Column {
-              Text(strings.systemTelemetry, style = MaterialTheme.typography.labelMedium, color = palette.cyanGlow)
+              Text(strings.systemTelemetry, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
               Text(
                 text = state.systemMessage,
                 style = MaterialTheme.typography.bodyMedium,
@@ -611,7 +634,6 @@ private fun MetricTile(
 ) {
   GlassCard(
     modifier = modifier,
-    glowColor = accent,
     contentPadding = PaddingValues(14.dp),
   ) {
     Row(

@@ -79,7 +79,11 @@ fun UploadTaskCard(
     modifier = Modifier
       .fillMaxWidth()
       .testTag("upload_task_card_${task.id}"),
-    glowColor = statusColor,
+    glowColor = when (task.stage) {
+      UploadStage.FAILED -> palette.errorAccent
+      UploadStage.COMPLETED, UploadStage.PAUSED -> null
+      else -> palette.cyanGlow
+    },
     contentPadding = PaddingValues(14.dp),
   ) {
     Row(

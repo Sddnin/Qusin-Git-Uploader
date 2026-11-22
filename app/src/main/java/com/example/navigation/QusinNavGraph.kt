@@ -5,6 +5,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
@@ -26,11 +27,13 @@ import androidx.compose.material.icons.rounded.LightMode
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Sync
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.NavigationRail
 import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.Scaffold
@@ -38,6 +41,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
@@ -133,6 +137,12 @@ fun QusinAppRoot(
     }
   }
 
+  LaunchedEffect(container) {
+    container.oauthCallbacks.collect {
+      navigateSingleTop(RepositoriesRoute)
+    }
+  }
+
   SpaceBackground {
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
       val useRail = maxWidth >= 600.dp
@@ -141,69 +151,89 @@ fun QusinAppRoot(
         containerColor = Color.Transparent,
         contentWindowInsets = WindowInsets.safeDrawing,
         topBar = {
-          TopAppBar(
-            title = {
-              Text(
-                text = strings.appName,
-                style = MaterialTheme.typography.titleLarge,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-              )
-            },
-            colors = TopAppBarDefaults.topAppBarColors(
-              containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.72f),
-              titleContentColor = MaterialTheme.colorScheme.onSurface,
-            ),
-            actions = {
-              IconButton(
-                onClick = { scope.launch { container.settingsRepository.setDarkMode(!isDarkMode) } },
-                modifier = Modifier.testTag("topbar_theme_toggle_btn"),
-              ) {
-                Icon(
-                  imageVector = if (isDarkMode) Icons.Rounded.LightMode else Icons.Rounded.DarkMode,
-                  contentDescription = strings.toggleThemeTooltip,
-                  tint = palette.cyanGlow,
+          Column {
+            TopAppBar(
+              title = {
+                Text(
+                  text = strings.appName,
+                  style = MaterialTheme.typography.titleLarge,
+                  maxLines = 1,
+                  overflow = TextOverflow.Ellipsis,
                 )
-              }
-              IconButton(
-                onClick = { navigateSingleTop(SettingsRoute) },
-                modifier = Modifier.testTag("topbar_settings_btn"),
-              ) {
-                Icon(
-                  imageVector = Icons.Rounded.Settings,
-                  contentDescription = strings.navSettings,
-                  tint = MaterialTheme.colorScheme.onSurface,
-                )
-              }
-            },
-          )
+              },
+              colors = TopAppBarDefaults.topAppBarColors(
+                containerColor = if (isDarkMode) {
+                  MaterialTheme.colorScheme.background
+                } else {
+                  MaterialTheme.colorScheme.surface.copy(alpha = 0.85f)
+                },
+                titleContentColor = MaterialTheme.colorScheme.onSurface,
+              ),
+              actions = {
+                IconButton(
+                  onClick = { scope.launch { container.settingsRepository.setDarkMode(!isDarkMode) } },
+                  modifier = Modifier.testTag("topbar_theme_toggle_btn"),
+                ) {
+                  Icon(
+                    imageVector = if (isDarkMode) Icons.Rounded.LightMode else Icons.Rounded.DarkMode,
+                    contentDescription = strings.toggleThemeTooltip,
+                    tint = if (isDarkMode) MaterialTheme.colorScheme.onSurfaceVariant else palette.cyanGlow,
+                  )
+                }
+                IconButton(
+                  onClick = { navigateSingleTop(SettingsRoute) },
+                  modifier = Modifier.testTag("topbar_settings_btn"),
+                ) {
+                  Icon(
+                    imageVector = Icons.Rounded.Settings,
+                    contentDescription = strings.navSettings,
+                    tint = MaterialTheme.colorScheme.onSurface,
+                  )
+                }
+              },
+            )
+            HorizontalDivider(thickness = 1.dp, color = MaterialTheme.colorScheme.outlineVariant)
+          }
         },
         bottomBar = {
           if (!useRail) {
-            NavigationBar(
-              containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
-            ) {
-              phoneDestinations.forEach { dest ->
-                val selected = currentDest?.hasRoute(dest.route::class) == true
-                NavigationBarItem(
-                  selected = selected,
-                  onClick = { navigateSingleTop(dest.route) },
-                  icon = {
-                    Icon(
-                      imageVector = if (selected) dest.selectedIcon else dest.unselectedIcon,
-                      contentDescription = dest.label,
-                      tint = if (selected) palette.cyanGlow else MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                  },
-                  label = {
-                    Text(
-                      text = dest.label,
-                      maxLines = 1,
-                      overflow = TextOverflow.Ellipsis,
-                    )
-                  },
-                  modifier = Modifier.testTag(dest.tag),
-                )
+            Column {
+              HorizontalDivider(thickness = 1.dp, color = MaterialTheme.colorScheme.outlineVariant)
+              NavigationBar(
+                containerColor = if (isDarkMode) {
+                  MaterialTheme.colorScheme.surface
+                } else {
+                  MaterialTheme.colorScheme.surface.copy(alpha = 0.94f)
+                },
+              ) {
+                phoneDestinations.forEach { dest ->
+                  val selected = currentDest?.hasRoute(dest.route::class) == true
+                  NavigationBarItem(
+                    selected = selected,
+                    onClick = { navigateSingleTop(dest.route) },
+                    colors = NavigationBarItemDefaults.colors(
+                      selectedIconColor = palette.cyanGlow,
+                      selectedTextColor = MaterialTheme.colorScheme.onSurface,
+                      indicatorColor = palette.cyanGlow.copy(alpha = if (isDarkMode) 0.14f else 0.18f),
+                      unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                      unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                    ),
+                    icon = {
+                      Icon(
+                        imageVector = if (selected) dest.selectedIcon else dest.unselectedIcon,
+                        contentDescription = dest.label,
+                      )
+                    },
+                    label = {
+                      Text(
+                        text = dest.label,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                      )
+                    },
+                    modifier = Modifier.testTag(dest.tag),
+                  )
+                }
               }
             }
           }
@@ -259,7 +289,10 @@ fun QusinAppRoot(
             composable<DashboardRoute> {
               DashboardScreen(
                 viewModel = dashboardVm,
-                onNavigateUpload = { _ -> navigateSingleTop(UploadRoute) },
+                onNavigateUpload = { mode ->
+                  uploadVm.prepareQuickLaunchMode(mode)
+                  navigateSingleTop(UploadRoute)
+                },
                 onNavigateUpdate = { navigateSingleTop(UpdateRoute) },
                 onNavigateRepos = { navigateSingleTop(RepositoriesRoute) },
                 onNavigateHistory = { navigateSingleTop(HistoryRoute) },

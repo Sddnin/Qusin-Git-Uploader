@@ -17,6 +17,7 @@ import com.example.domain.model.LfsClassification
 import com.example.domain.model.SelectedFileItem
 import com.example.domain.model.UploadTaskModel
 import com.example.domain.model.ZipMode
+import com.example.feature.dashboard.UploadQuickLaunchMode
 import com.example.gitlfs.GitLfsClassifier
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -33,6 +34,7 @@ data class ConflictPromptState(
 )
 
 data class UploadUiState(
+  val selectedPickerCategory: FilePickerCategory = FilePickerCategory.SOURCE_CODE,
   val projectName: String = "My Project",
   val allFiles: List<SelectedFileItem> = emptyList(),
   val visibleFiles: List<SelectedFileItem> = emptyList(),
@@ -65,6 +67,7 @@ class UploadViewModel(
   private val container: AppContainer,
 ) : ViewModel() {
 
+  private val selectedPickerCategory = MutableStateFlow(FilePickerCategory.SOURCE_CODE)
   private val projectName = MutableStateFlow("My Project")
   private val rawFiles = MutableStateFlow<List<SelectedFileItem>>(emptyList())
   private val extensionFilter = MutableStateFlow<String?>(null)
@@ -163,6 +166,7 @@ class UploadViewModel(
     val effectiveBranch = if (tgt.repo != null) tgt.branch else effectiveRepo?.defaultBranch ?: src.settings.defaultBranch
 
     UploadUiState(
+      selectedPickerCategory = selectedPickerCategory.value,
       projectName = src.projectName,
       allFiles = afterExclusions,
       visibleFiles = visible,
@@ -204,6 +208,18 @@ class UploadViewModel(
     }
   }
 
+  fun selectPickerCategory(category: FilePickerCategory) {
+    selectedPickerCategory.value = category
+  }
+
+  fun prepareQuickLaunchMode(mode: UploadQuickLaunchMode) {
+    selectedPickerCategory.value = when (mode) {
+      UploadQuickLaunchMode.PROJECT, UploadQuickLaunchMode.FOLDER -> FilePickerCategory.PROJECT_FOLDER
+      UploadQuickLaunchMode.ZIP -> FilePickerCategory.ARCHIVES
+      UploadQuickLaunchMode.FILES -> FilePickerCategory.SOURCE_CODE
+    }
+  }
+
   fun onSingleOrMultiFilesPicked(uris: List<Uri>) {
     if (uris.isEmpty()) return
     viewModelScope.launch {
@@ -242,12 +258,19 @@ class UploadViewModel(
         val scanned = withContext(container.dispatchers.io) {
           container.safFileScanner.scanSingleOrMultipleUris(listOf(uri), settings)
         }
-        val zipItem = scanned.firstOrNull()
-        if (zipItem != null) {
-          pendingZipItem.value = zipItem
-          selectedZipMode.value = null
-          projectName.value = zipItem.name.removeSuffix(".zip")
-          rawFiles.value = emptyList()
+        val archiveItem = scanned.firstOrNull()
+        if (archiveItem != null) {
+          if (archiveItem.extension.equals("zip", ignoreCase = true)) {
+            pendingZipItem.value = archiveItem
+            selectedZipMode.value = null
+            projectName.value = archiveItem.name.removeSuffix(".zip")
+            rawFiles.value = emptyList()
+          } else {
+            pendingZipItem.value = null
+            selectedZipMode.value = null
+            projectName.value = archiveItem.name
+            rawFiles.value = listOf(archiveItem)
+          }
         }
       } catch (t: Throwable) {
         error.value = AppError.fromThrowable(t)

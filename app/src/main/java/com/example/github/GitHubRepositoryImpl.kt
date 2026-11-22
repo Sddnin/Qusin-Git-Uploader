@@ -1,8 +1,11 @@
 package com.example.github
 
+import android.net.Uri
 import com.example.core.common.AppDispatchers
 import com.example.core.common.AppError
 import com.example.core.common.AppResult
+import com.example.core.security.GitHubOAuthManager
+import com.example.core.security.OAuthCallbackValidation
 import com.example.core.security.TokenStore
 import com.example.domain.model.GitHubBranch
 import com.example.domain.model.GitHubCommit
@@ -26,6 +29,7 @@ class GitHubRepositoryImpl(
   private val api: GitHubApiService,
   private val tokenStore: TokenStore,
   private val dispatchers: AppDispatchers,
+  private val oauthManager: GitHubOAuthManager? = null,
 ) : GitHubAuthRepository, GitHubRepoRepository {
 
   private val _currentUser = MutableStateFlow<GitHubUser?>(null)
@@ -60,6 +64,30 @@ class GitHubRepositoryImpl(
       AppResult.Success(user)
     } catch (t: Throwable) {
       AppResult.Failure(AppError.fromThrowable(t))
+    }
+  }
+
+  override suspend fun completeOAuthLogin(callbackUri: Uri): AppResult<GitHubUser> {
+    val manager = oauthManager
+      ?: return AppResult.Failure(AppError.Unknown("OAuth manager is not initialized"))
+    val validation = withContext(dispatchers.io) {
+      manager.validateCallbackUri(callbackUri)
+    }
+    return when (validation) {
+      is OAuthCallbackValidation.Failed -> AppResult.Failure(validation.error)
+      is OAuthCallbackValidation.Authorized -> {
+        val tokenResult = withContext(dispatchers.io) {
+          manager.exchangeCodeForToken(
+            clientId = validation.clientId,
+            code = validation.code,
+            codeVerifier = validation.codeVerifier,
+          )
+        }
+        when (tokenResult) {
+          is AppResult.Failure -> AppResult.Failure(tokenResult.error)
+          is AppResult.Success -> validateAndSaveToken(tokenResult.data)
+        }
+      }
     }
   }
 

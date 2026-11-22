@@ -1,10 +1,12 @@
 package com.example.feature.repository
 
+import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.example.core.common.AppError
 import com.example.core.common.AppResult
+import com.example.core.security.GitHubOAuthManager
 import com.example.data.AppContainer
 import com.example.domain.model.GitHubBranch
 import com.example.domain.model.GitHubCommit
@@ -28,6 +30,9 @@ data class RepositoryUiState(
   val commits: List<GitHubCommit> = emptyList(),
   val isLoading: Boolean = false,
   val isLoadingBranches: Boolean = false,
+  val isOAuthInProgress: Boolean = false,
+  val oauthClientId: String = "",
+  val oauthRedirectUri: String = GitHubOAuthManager.REDIRECT_URI,
   val error: AppError? = null,
   val infoBanner: String? = null,
 )
@@ -43,8 +48,11 @@ class RepositoryViewModel(
   private val commits = MutableStateFlow<List<GitHubCommit>>(emptyList())
   private val isLoading = MutableStateFlow(false)
   private val isLoadingBranches = MutableStateFlow(false)
+  private val isOAuthInProgress = MutableStateFlow(false)
+  private val oauthClientId = MutableStateFlow(container.oauthManager.getConfiguredClientId())
   private val error = MutableStateFlow<AppError?>(null)
   private val infoBanner = MutableStateFlow<String?>(null)
+  private var lastConsumedCallbackUri: String? = null
 
   private val repoStatePart = combine(
     container.gitHubAuthRepository.currentUser,
@@ -66,7 +74,15 @@ class RepositoryViewModel(
     StatusTuple(selBranch, commitList, loading, branchLoading, err)
   }
 
-  val uiState: StateFlow<RepositoryUiState> = combine(repoStatePart, statusPart, infoBanner) { r, s, banner ->
+  private val oauthPart = combine(
+    isOAuthInProgress,
+    oauthClientId,
+    infoBanner,
+  ) { inProgress, clientId, banner ->
+    Triple(inProgress, clientId, banner)
+  }
+
+  val uiState: StateFlow<RepositoryUiState> = combine(repoStatePart, statusPart, oauthPart) { r, s, oauth ->
     val filtered = if (r.query.isBlank()) {
       r.repos
     } else {
@@ -86,21 +102,96 @@ class RepositoryViewModel(
       commits = s.commits,
       isLoading = s.loading,
       isLoadingBranches = s.branchLoading,
+      isOAuthInProgress = oauth.first,
+      oauthClientId = oauth.second,
       error = s.error,
-      infoBanner = banner,
+      infoBanner = oauth.third,
     )
   }.stateIn(
     scope = viewModelScope,
     started = SharingStarted.WhileSubscribed(5000),
-    initialValue = RepositoryUiState(),
+    initialValue = RepositoryUiState(oauthClientId = container.oauthManager.getConfiguredClientId()),
   )
 
   init {
     refreshAll()
+    observeOAuthCallbacks()
+  }
+
+  private fun observeOAuthCallbacks() {
+    viewModelScope.launch {
+      container.oauthCallbacks.collect { uri ->
+        val raw = uri.toString()
+        if (raw == lastConsumedCallbackUri) return@collect
+        lastConsumedCallbackUri = raw
+
+        isOAuthInProgress.value = false
+        isLoading.value = true
+        error.value = null
+        infoBanner.value = null
+        when (val res = container.gitHubAuthRepository.completeOAuthLogin(uri)) {
+          is AppResult.Success -> {
+            infoBanner.value = "Connected @${res.data.login} via GitHub OAuth"
+            refreshRepositories()
+          }
+          is AppResult.Failure -> {
+            error.value = res.error
+          }
+        }
+        isLoading.value = false
+      }
+    }
   }
 
   fun updateSearchQuery(query: String) {
     searchQuery.value = query
+  }
+
+  fun saveOAuthClientId(clientId: String) {
+    container.oauthManager.saveCustomClientId(clientId)
+    oauthClientId.value = container.oauthManager.getConfiguredClientId()
+    error.value = null
+    if (oauthClientId.value.isNotEmpty()) {
+      infoBanner.value = "Saved OAuth Client ID"
+    }
+  }
+
+  fun startBrowserOAuth(
+    clientIdInput: String? = null,
+    launchBrowserTab: (Uri) -> AppResult<Unit>,
+  ) {
+    if (!clientIdInput.isNullOrBlank()) {
+      saveOAuthClientId(clientIdInput)
+    }
+    val effectiveId = oauthClientId.value.trim()
+    error.value = null
+    infoBanner.value = null
+    when (val authRes = container.oauthManager.beginAuthorization(effectiveId)) {
+      is AppResult.Failure -> {
+        isOAuthInProgress.value = false
+        error.value = authRes.error
+      }
+      is AppResult.Success -> {
+        isOAuthInProgress.value = true
+        when (val launchRes = launchBrowserTab(authRes.data)) {
+          is AppResult.Success -> Unit
+          is AppResult.Failure -> {
+            isOAuthInProgress.value = false
+            container.oauthManager.cancelPendingSession()
+            error.value = launchRes.error
+          }
+        }
+      }
+    }
+  }
+
+  fun cancelPendingOAuth() {
+    container.oauthManager.cancelPendingSession()
+    isOAuthInProgress.value = false
+  }
+
+  fun notifyInfo(message: String) {
+    infoBanner.value = message
   }
 
   fun connectWithToken(token: String) {
